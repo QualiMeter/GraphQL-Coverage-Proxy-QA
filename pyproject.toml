@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "graphql-coverage-qa"
+version = "0.2.0"
+description = "API and browser acceptance tests for GraphQL Coverage Proxy"
+requires-python = ">=3.12"
+dynamic = ["dependencies"]
+
+[project.scripts]
+coverage-qa = "coverage_qa.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.package-data]
+coverage_qa = ["web/*.html", "web/*.css", "web/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+markers = ["case(title): scenario title", "coverage: Coverage Proxy integration", "browser: Playwright E2E"]
+filterwarnings = ["ignore::DeprecationWarning:starlette.testclient", "ignore::DeprecationWarning:httpx"]

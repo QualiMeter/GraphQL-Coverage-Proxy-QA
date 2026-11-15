@@ -7,3 +7,7 @@ reports/
 .env
 .env.*
 !.env.example
+
+*.egg-info/
+build/
+dist/

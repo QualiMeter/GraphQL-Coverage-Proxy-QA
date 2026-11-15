@@ -31,11 +31,13 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements.lock.txt
         working-directory: api-tests
+      - run: python -m pip install -e . --no-deps
+        working-directory: api-tests
       - run: python -m playwright install --with-deps chromium
         working-directory: api-tests
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/api-tests/.browsers
-      - run: python run_tests.py --suite all --local --coverage-backend-dir ../coverage-backend
+      - run: python -m coverage_qa test --coverage-backend-dir ../coverage-backend
         working-directory: api-tests
       - uses: actions/upload-artifact@v4
         if: always()

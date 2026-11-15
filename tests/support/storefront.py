@@ -1,0 +1,128 @@
+"""Real browser shop → BFF → unchanged Coverage Proxy → commerce PostgreSQL."""
+
+import hashlib
+import json
+import os
+import re
+import time
+from decimal import Decimal
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from playwright.sync_api import expect, sync_playwright
+
+from tests.support.http_client import API, ensure_entry, redact
+from tests.support.coverage_client import CoverageRun
+from coverage_qa.environment import ROOT, Server
+from coverage_qa.reporting.progress import emit, evidence_id
+
+
+@pytest.fixture
+def storefront(request, business_stack):
+    entry = ensure_entry(request)
+    api = API(business_stack.proxy.base + "/graphql", entry, business_stack.key)
+    run = CoverageRun(api, business_stack, request.config.api_report, total_fields=35)
+    server = None
+    browser = context = page = None
+    token = None
+    previous_orders = set()
+    slug = "shop-" + evidence_id(request.node.nodeid)
+
+    def direct(query, variables=None):
+        status, body = api.http("Независимая проверка PostgreSQL через API", "POST", business_stack.upstream.base + "/graphql",
+                                payload={"query": query, "variables": variables}, auth=False,
+                                headers={"Authorization": "Bearer " + token} if token else {})
+        api.expect("Проверочное чтение: HTTP", status, 200)
+        api.expect("Проверочное чтение: нет GraphQL errors", body.get("errors", []), [])
+        return body["data"]
+
+    try:
+        run.prepare(request.node.nodeid)
+        token = direct('mutation($password:String!){login(email:"alice@example.test",password:$password){token}}',
+                       {"password": "test-password-2026"})["login"]["token"]
+        previous_orders = {x["id"] for x in direct("{orders{id}}")["orders"]}
+        server = Server("examples.shop.web.server:app", ROOT, request.config.run_folder / (slug + ".log"), {
+            "SHOP_GRAPHQL_URL": business_stack.proxy.base + "/graphql",
+            "SHOP_COVERAGE_API_KEY": business_stack.key, "SHOP_COVERAGE_RUN_ID": run.run_id,
+        })
+        server.start()
+        with sync_playwright() as playwright:
+            channel = os.environ.get("API_TEST_BROWSER_CHANNEL")
+            if not channel and os.name == "nt":
+                edge_candidates = [
+                    Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Microsoft/Edge/Application/msedge.exe",
+                    Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Microsoft/Edge/Application/msedge.exe",
+                    Path("C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"),
+                    Path("C:/Program Files/Microsoft/Edge/Application/msedge.exe"),
+                ]
+                if any(p.exists() for p in edge_candidates):
+                    channel = "msedge"
+            try:
+                browser = playwright.chromium.launch(headless=True, **({"channel": channel} if channel else {}))
+            except Exception as exc:
+                if "Executable doesn't exist" in str(exc):
+                    pytest.skip("Браузер Playwright не установлен. Запустите: python -m playwright install chromium")
+                raise
+            context = browser.new_context(viewport={"width": 1440, "height": 1050})
+            context.tracing.start(screenshots=True, snapshots=True, sources=False)
+            page = context.new_page()
+            starts = {}
+
+            def started(req):
+                if req.url.endswith("/api/graphql"):
+                    starts[req] = time.perf_counter()
+
+            def response_received(response):
+                if not response.url.endswith("/api/graphql"):
+                    return
+                payload = response.request.post_data_json
+                try:
+                    body = response.json()
+                except Exception:
+                    body = {"rawResponse": response.text()}
+                event = {"kind": "request", "title": "Магазин: " + (payload.get("operationName") or "GraphQL"),
+                         "method": "POST", "url": response.url, "request": redact(payload), "response": redact(body),
+                         "headers": {"Authorization": "<redacted>"} if "authorization" in response.request.headers else {},
+                         "httpStatus": response.status, "durationMs": round((time.perf_counter() - starts.get(response.request, time.perf_counter())) * 1000, 2),
+                         "error": None}
+                entry["events"].append(event)
+                run.record["exchanges"].append({"title": event["title"], "operationName": payload.get("operationName"),
+                                                "queryHash": hashlib.sha256(payload["query"].encode()).hexdigest(),
+                                                "declaredSelectedFields": [], "httpStatus": response.status,
+                                                "eventIndex": len(entry["events"]) - 1, "runId": run.run_id,
+                                                "attribution": "browser-operation-aggregate"})
+                emit()
+
+            page.on("request", started)
+            page.on("response", response_received)
+            page.goto(server.base)
+            expect(page.get_by_test_id("product-keyboard")).to_be_visible()
+            entry["transport"] = "browser → storefront → coverage-proxy → commerce-api"
+            entry["target"] = server.base
+            try:
+                yield SimpleNamespace(page=page, api=api, direct=direct, run=run)
+            finally:
+                if page:
+                    image_name = slug + ".png"
+                    page.screenshot(path=str(request.config.run_folder / image_name), full_page=True)
+                    entry["events"].append({"kind": "attachment", "title": "Магазин: результат браузерного сценария", "path": image_name})
+                if context:
+                    trace_name = slug + ".zip"
+                    context.tracing.stop(path=str(request.config.run_folder / trace_name))
+                    entry["events"].append({"kind": "attachment", "title": "Магазин: Playwright trace", "path": trace_name})
+                if browser:
+                    browser.close()
+    finally:
+        try:
+            if server:
+                server.stop()
+            if token:
+                for order in direct("{orders{id}}")["orders"]:
+                    if order["id"] not in previous_orders:
+                        direct("mutation($id:ID!){cancelOrder(id:$id){id status}}", {"id": order["id"]})
+        finally:
+            if run.run_id:
+                run.finish()
+                run.snapshot("Фактическое покрытие браузерного магазина")
+            api.client.close()
