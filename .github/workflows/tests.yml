@@ -39,6 +39,20 @@ jobs:
           PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/api-tests/.browsers
       - run: python -m coverage_qa test --coverage-backend-dir ../coverage-backend
         working-directory: api-tests
+      - name: Backend unit tests for analysis, schema parsing and document storage
+        working-directory: coverage-backend
+        run: python -m pytest -q tests/test_query_analyzer.py tests/test_schema_parser.py tests/test_safe_document.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install MVP acceptance dependencies
+        working-directory: api-tests
+        run: |
+          python -m pip install -r acceptance/mvp/requirements.txt
+          npm ci --prefix acceptance/mvp
+      - name: Verify nine-field MVP and persistence
+        working-directory: api-tests
+        run: python -m acceptance.mvp.run
       - uses: actions/upload-artifact@v4
         if: always()
         with:

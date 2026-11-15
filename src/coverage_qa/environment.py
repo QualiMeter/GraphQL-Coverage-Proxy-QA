@@ -98,13 +98,14 @@ class Server:
 
 
 class CoverageStack:
-    def __init__(self, folder, backend_dir=TEAM_BACKEND, *, commerce=False):
+    def __init__(self, folder, backend_dir=TEAM_BACKEND, *, commerce=False, upstream_module="tests.support.upstream.app:app"):
         self.folder, self.backend_dir = Path(folder), Path(backend_dir)
         self.project = "gqltests" + secrets.token_hex(6)
         self.key = secrets.token_hex(32)
         self.upstream = self.secondary = self.proxy = None
         self.compose_started = False
         self.commerce = commerce
+        self.upstream_module = upstream_module
         self.command = ["docker", "compose", "-p", self.project, "-f", str(ROOT / "tests" / "support" / "compose.yaml")]
 
     def start(self):
@@ -131,7 +132,7 @@ class CoverageStack:
                         await conn.close()
                 asyncio.run(create_database())
                 upstream_env["COMMERCE_DATABASE_URL"] = self.database_url.replace("postgresql+asyncpg:", "postgresql:").rsplit("/", 1)[0] + "/commerce_tests"
-            self.upstream = Server("examples.shop.api.app:app" if self.commerce else "tests.support.upstream.app:app", ROOT,
+            self.upstream = Server("examples.shop.api.app:app" if self.commerce else self.upstream_module, ROOT,
                                    self.folder / ("commerce.log" if self.commerce else "upstream.log"), upstream_env)
             self.upstream.start()
             origins = [self.upstream.base]
