@@ -83,16 +83,16 @@ def main():
     code = 2
     try:
         command = [sys.executable, "-m", "pytest", "-c", str(ROOT / "pyproject.toml"), "-v",
-                   "--run-folder", str(folder), "--run-label", args.label, f"--junitxml={folder / 'junit.xml'}"]
+                   f"--run-folder={folder}", f"--run-label={args.label}", f"--junitxml={folder / 'junit.xml'}"]
         if args.selection_file:
-            command += ["--selection-file", str(args.selection_file.resolve())]
+            command += [f"--selection-file={args.selection_file.resolve()}"]
         if args.coverage_url:
-            command += ["--coverage-url", args.coverage_url, "--upstream-url", args.upstream_url]
+            command += [f"--coverage-url={args.coverage_url}", f"--upstream-url={args.upstream_url}"]
         else:
             command += ["--managed-coverage"]
-        command += ["--coverage-backend-dir", str(args.coverage_backend_dir.resolve())]
+        command += [f"--coverage-backend-dir={args.coverage_backend_dir.resolve()}"]
         if args.live_base_url:
-            command += ["--live-base-url", args.live_base_url]
+            command += [f"--live-base-url={args.live_base_url}"]
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PLAYWRIGHT_BROWSERS_PATH": str(ROOT / ".browsers")}
         code = subprocess.call([*command, *paths, *extra], cwd=ROOT, env=env)
     except (Exception, KeyboardInterrupt) as exc:
