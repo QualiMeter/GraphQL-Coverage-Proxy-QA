@@ -141,3 +141,50 @@ def test_storefront_logout_discards_pending_orders(storefront):
     p.wait_for_function("S.requests.at(-1).ms !== null")
     assert p.evaluate("S.me === null && S.orders.length === 0")
     expect(p.locator("#orders-list .order-card")).to_have_count(0)
+
+
+@pytest.mark.case("Магазин: потерянный ответ покупки → повтор → один заказ и одно списание")
+def test_storefront_retry_after_lost_checkout_response(storefront):
+    s, p = storefront, storefront.page
+    before = s.direct("{products{id stock}}")["products"]
+    initial_stock = next(x["stock"] for x in before if x["id"] == "cable")
+    previous = {x["id"] for x in s.direct("{orders{id}}")["orders"]}
+    login(p)
+    attempts = []
+
+    def lose_first_response(route):
+        payload = route.request.post_data_json
+        if payload.get("operationName") != "CreateOrder":
+            route.continue_()
+            return
+        # The real BFF/proxy/API completes the mutation before the browser sees a transport fault.
+        response = route.fetch(max_retries=0, max_redirects=0)
+        body = response.json()
+        s.api.expect("Настоящий API завершил mutation до сбоя ответа", response.status, 200)
+        s.api.expect("Mutation не вернула GraphQL errors", body.get("errors", []), [])
+        attempts.append({"input": payload["variables"]["input"], "orderId": body["data"]["createOrder"]["id"]})
+        if len(attempts) == 1:
+            route.fulfill(status=502, content_type="application/json", body=json.dumps({"errors": [{"message": "Controlled lost response after commit"}]}))
+        else:
+            route.fulfill(response=response)
+
+    p.route("**/api/graphql", lose_first_response)
+    p.get_by_test_id("product-cable").get_by_role("button", name="В корзину +", exact=True).click()
+    p.get_by_role("button", name="Открыть корзину", exact=True).click()
+    p.get_by_role("button", name="Оформить заказ", exact=True).click()
+    expect(p.locator("#checkout-error")).to_contain_text("502")
+    expect(p.get_by_role("button", name="Оформить заказ", exact=True)).to_be_enabled()
+    s.api.expect("До повтора сервер уже сохранил ровно один новый заказ", sorted({x["id"] for x in s.direct("{orders{id}}")["orders"]} - previous), [attempts[0]["orderId"]])
+    p.get_by_role("button", name="Оформить заказ", exact=True).click()
+    expect(p.get_by_test_id("success-order-id")).to_be_visible()
+    id = p.get_by_test_id("success-order-id").inner_text()
+    s.api.expect("Обе mutation исполнились через настоящий API", len(attempts), 2)
+    s.api.expect("Повтор сохранил тот же idempotency key и состав", attempts[1]["input"], attempts[0]["input"])
+    s.api.expect("Браузер получил исходный заказ", id, attempts[0]["orderId"])
+    s.api.expect("Повтор не создал второй заказ", sorted({x["id"] for x in s.direct("{orders{id}}")["orders"]} - previous), [id])
+    remaining = next(x["stock"] for x in s.direct("{products{id stock}}")["products"] if x["id"] == "cable")
+    s.api.expect("Товар списан один раз", remaining, initial_stock - 1)
+    checkpoint = s.run.snapshot("Потерянный ответ и повторная покупка")
+    operation = next(x for x in checkpoint["operations"] if x["operationName"] == "CreateOrder")
+    s.api.expect("Proxy сохранил оба обращения mutation", operation["requestCount"], 2)
+    s.api.expect("Покрытие отражает два вызова, а не число заказов", checkpoint["fieldHits"]["Mutation.createOrder"], 2)

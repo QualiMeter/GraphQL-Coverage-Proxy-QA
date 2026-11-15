@@ -30,8 +30,8 @@
 | Безопасный AST | available/redacted/unavailable, scalar/default redaction, отсутствие комментариев и runtime secrets в safe document |
 | Статистика | Категории анализа, total, avg и P95 по фактическим durations; null в пустом run |
 | Schema labels/SDL/graph | Label trim/reset/dedup; неизменность ID/hash/SDL; roots, interfaces/unions, args, description/deprecation и relation UUIDv5 |
-| Browser access | Настоящие cookie-сессии viewer/analyst/operator, CSRF, grants/revocation, закрытая metadata и logout |
-| Бизнес-API и магазин | Проверки заказа/остатков напрямую и через proxy; отдельный browser E2E магазина |
+| Browser access | Настоящие cookie-сессии viewer/analyst/operator, CSRF, grants/revocation, закрытая metadata, logout, ротация cookie и публикация агрегатов без открытия журнала |
+| Бизнес-API и магазин | Проверки заказа/остатков напрямую и через proxy; отдельный browser E2E магазина, включая повтор после потерянного ответа |
 
 Файлы сценариев перечислены в [test-plan.md](test-plan.md). Все локальные стенды изолированы. Рабочие данные и production не используются.
 
