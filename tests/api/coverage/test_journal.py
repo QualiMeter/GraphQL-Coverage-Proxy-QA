@@ -24,7 +24,15 @@ def page(r, path):
 @pytest.mark.case("Журнал: каждое повторное обращение имеет собственные поля и неизменный operationKey")
 def test_request_details_are_per_exchange(coverage_run):
     r = coverage_run
-    one, two = send(r), send(r)
+    one = send(r)
+    status, _ = r.graphql("Отклонённый запрос с чужим run ID", QUERY, operation="UserInfo",
+                          variables={"id": "1"}, run_id=str(uuid4()))
+    rejected = r.record["exchanges"][-1]
+    r.api.expect("Неизвестный run отклонён", status, 404)
+    r.snapshot("Отклонённый запрос рядом с успешной операцией")
+    r.api.expect("Отказу не приписаны поля успешного запроса", "actualSelectedFields" in rejected, False)
+    r.api.expect("Отказу не приписан чужой агрегат", "observedOperationKey" in rejected, False)
+    two = send(r)
     r.api.expect("Разные ID HTTP-наблюдений", one["observedRequestIds"] != two["observedRequestIds"], True)
     for exchange in (one, two):
         r.api.expect("Фактические поля отдельного запроса", exchange["actualSelectedFields"], FIELDS)

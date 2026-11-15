@@ -102,13 +102,15 @@ class CoverageRun:
                       "fieldHits": field_hits(graph)}
         self.record["checkpoints"].append(checkpoint)
         for exchange in self.record["exchanges"]:
+            if exchange["runId"] != self.run_id:
+                continue
             for operation in operations:
                 identity = [exchange["queryHash"], exchange["operationName"], operation["operationType"]]
                 key = hashlib.sha256(json.dumps(identity, ensure_ascii=True, separators=(",", ":")).encode()).hexdigest()
                 if key == operation["operationKey"]:
                     exchange["observedOperationKey"] = key
                     matching = [d for d in details if d["operationKey"] == key]
-                    if "observedRequestIds" not in exchange and len(matching) == 1:
+                    if exchange.get("attribution") == "browser-operation-aggregate" and len(matching) == 1:
                         exchange["observedRequestIds"] = [matching[0]["id"]]
                         exchange["attribution"] = "unique-operation-request"
                         self.attach_detail(exchange, matching[0])
