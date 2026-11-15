@@ -1,0 +1,4 @@
+fastapi==0.163.1
+uvicorn==0.54.0
+graphql-core==3.2.14
+asyncpg==0.32.0

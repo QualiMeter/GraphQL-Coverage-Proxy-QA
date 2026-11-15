@@ -1,0 +1,48 @@
+services:
+  database:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: commerce
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: local_demo_only
+    volumes:
+      - commerce-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d commerce"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  api:
+    build:
+      context: .
+      dockerfile: demo_service/Dockerfile
+    environment:
+      COMMERCE_DATABASE_URL: postgresql://demo:local_demo_only@database:5432/commerce
+    ports:
+      - "127.0.0.1:9100:9100"
+    depends_on:
+      database:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9100/health')"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  storefront:
+    build:
+      context: .
+      dockerfile: mini_shop/Dockerfile
+    environment:
+      SHOP_GRAPHQL_URL: http://api:9100/graphql
+    ports:
+      - "127.0.0.1:9110:9110"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9110/health')"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  commerce-data:

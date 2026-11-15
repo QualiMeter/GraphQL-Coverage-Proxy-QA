@@ -1,0 +1,44 @@
+name: API integration tests
+permissions:
+  contents: read
+on:
+  workflow_dispatch:
+    inputs:
+      backend_ref:
+        description: Coverage backend ref to test
+        default: main
+        required: true
+  push:
+  pull_request:
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: api-tests
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: QualiMeter/GraphQL-Coverage-Proxy-Beckend
+          ref: ${{ inputs.backend_ref || 'main' }}
+          path: coverage-backend
+          token: ${{ secrets.COVERAGE_BACKEND_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.lock.txt
+        working-directory: api-tests
+      - run: python -m playwright install --with-deps chromium
+        working-directory: api-tests
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/api-tests/.browsers
+      - run: python run_tests.py --suite all --local --coverage-backend-dir ../coverage-backend
+        working-directory: api-tests
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-test-results
+          path: api-tests/reports/

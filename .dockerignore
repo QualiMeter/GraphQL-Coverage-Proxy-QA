@@ -1,0 +1,10 @@
+.venv
+.browsers
+.pytest_cache
+.tmp
+reports
+__pycache__
+**/__pycache__
+.git
+.env
+.env.*
