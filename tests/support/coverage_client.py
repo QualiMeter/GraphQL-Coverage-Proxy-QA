@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import urllib.parse
 from uuid import uuid4
 
 
@@ -51,6 +52,11 @@ class CoverageRun:
 
     def graphql(self, title, query, *, variables=None, operation=None, fields=(), mode=None, run_id=None, headers=None):
         headers = {**(headers or {}), "X-Coverage-Run-Id": run_id or self.run_id}
+        if self.record:
+            if "testId" in self.record and self.record["testId"]:
+                headers["X-Test-Id"] = urllib.parse.quote(str(self.record["testId"]))
+            if "name" in self.record and self.record["name"]:
+                headers["X-Scenario-Name"] = urllib.parse.quote(str(self.record["name"]))
         if mode:
             headers["X-Test-Mode"] = mode
         status, body = self.api.raw(title, payload={"query": query, "variables": variables, "operationName": operation}, headers=headers)

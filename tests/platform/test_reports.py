@@ -87,3 +87,71 @@ def test_credentials_are_redacted_without_altering_runtime_response():
     assert "inline-secret-pass" not in masked_inline["query"]
     assert '<redacted>' in masked_inline["query"]
     assert redact({"csrfToken": "csrf-secret"})["csrfToken"] == "<redacted>"
+
+
+@pytest.mark.case("Экспорт: отчёт создаёт coverage.csv и test-matrix.csv рядом с HTML")
+def test_csv_exports_created_with_report(tmp_path):
+    folder = new_run(tmp_path, "csv-test", "tooling")
+    report = result(folder, "csv-test")
+    report["tests"] = [{
+        "id": "tests/test_catalog.py::test_case",
+        "title": "Тестовый сценарий каталога",
+        "status": "passed",
+        "duration": 0.123,
+        "events": [],
+        "failure": None,
+    }]
+    report["coverageRuns"] = [{
+        "testId": "tests/test_catalog.py::test_case",
+        "runId": "run-uuid-1",
+        "name": "Основной",
+        "finalFieldHits": {"Query.user": 2, "User.id": 2, "User.email": 0},
+        "summary": {"totalFields": 3, "coveredFields": 2, "coveragePercent": 66.67},
+    }]
+    write_report(report, folder / "index.html")
+    csv_file = folder / "coverage.csv"
+    matrix_file = folder / "test-matrix.csv"
+    assert csv_file.exists()
+    assert matrix_file.exists()
+
+    csv_content = csv_file.read_text(encoding="utf-8")
+    assert "run_id,test_id,run_name,type_name,field_name,coordinate,hits,covered,coverage_percent" in csv_content
+    assert "run-uuid-1,tests/test_catalog.py::test_case,Основной,Query,user,Query.user,2,True,66.67" in csv_content
+    assert "run-uuid-1,tests/test_catalog.py::test_case,Основной,User,email,User.email,0,False,66.67" in csv_content
+
+    matrix_content = matrix_file.read_text(encoding="utf-8")
+    assert "test_id,test_title,status,duration_sec,run_id,covered_fields_count,covered_coordinates" in matrix_content
+    assert "tests/test_catalog.py::test_case,Тестовый сценарий каталога,passed,0.123,run-uuid-1,2,Query.user; User.id" in matrix_content
+
+
+@pytest.mark.case("Сравнение: diff между прогонами корректно вычисляет дельту полей и обращений")
+def test_compare_runs_coverage_diff():
+    from coverage_qa.reporting.diff import compare_runs, format_diff_markdown, format_diff_csv
+    run_before = {
+        "finalFieldHits": {"Query.user": 1, "User.id": 1, "User.email": 0, "Mutation.createOrder": 0},
+        "summary": {"totalFields": 4, "coveredFields": 2, "coveragePercent": 50.0},
+    }
+    run_after = {
+        "finalFieldHits": {"Query.user": 2, "User.id": 3, "User.email": 0, "Mutation.createOrder": 1},
+        "summary": {"totalFields": 4, "coveredFields": 3, "coveragePercent": 75.0},
+    }
+    diff = compare_runs(run_before, run_after)
+    assert diff["summary"]["totalFields"] == 4
+    assert diff["summary"]["beforeCovered"] == 2
+    assert diff["summary"]["afterCovered"] == 3
+    assert diff["summary"]["deltaCovered"] == 1
+    assert diff["summary"]["deltaPercent"] == 25.0
+    assert diff["newlyCovered"] == ["Mutation.createOrder"]
+    assert diff["hitsDeltas"]["Query.user"] == 1
+    assert diff["hitsDeltas"]["User.id"] == 2
+    assert diff["hitsDeltas"]["Mutation.createOrder"] == 1
+    assert diff["hitsDeltas"]["User.email"] == 0
+
+    md = format_diff_markdown(diff)
+    assert "Сравнение покрытия (Coverage Diff)" in md
+    assert "`Mutation.createOrder`" in md
+    assert "Впервые покрыто" in md
+
+    csv_data = format_diff_csv(diff)
+    assert "Mutation.createOrder,0,1,1,newly_covered" in csv_data
+

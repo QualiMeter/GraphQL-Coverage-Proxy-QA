@@ -144,6 +144,26 @@ def test_analysis_failures(coverage_run, query, operation, expected_status):
     r.api.expect("Честный статус анализатора", checkpoint["requests"][0]["analysisStatus"], expected_status)
 
 
+@pytest.mark.case("Подписка (Subscription): статус unsupported, countedInCoverage=False, отсутствие ложного покрытия")
+def test_subscription_unsupported_handling(coverage_run):
+    r = coverage_run
+    status, body = r.graphql(
+        "Передать операцию subscription через прокси",
+        'subscription OnUserChange { user(id: "1") { id name } }',
+        operation="OnUserChange",
+    )
+    r.api.expect("HTTP-ответ прокси получен", status, 200)
+    checkpoint = r.snapshot("После операции subscription")
+    r.expect_fields(checkpoint, set())
+    r.api.expect("Есть ровно одно наблюдение", len(checkpoint["requests"]), 1)
+    obs = checkpoint["requests"][0]
+    r.api.expect("Честный статус анализатора", obs["analysisStatus"], "unsupported")
+    detail = r.rest("Детали запроса", "GET", f"/api/runs/{r.run_id}/requests/{obs['id']}")
+    r.api.expect("Исключено из покрытия", detail["countedInCoverage"], False)
+    stats = r.rest("Сверить статистику прогона", "GET", f"/api/runs/{r.run_id}/stats")
+    r.api.expect("Counted requests равен 0", stats["countedRequests"], 0)
+
+
 @pytest.mark.parametrize("mode,status,has_data,has_errors,counted", [
     ("no-data", 200, False, True, False),
     ("partial", 200, True, True, True),

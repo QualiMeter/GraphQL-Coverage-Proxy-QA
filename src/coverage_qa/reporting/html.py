@@ -1,6 +1,8 @@
 """Render evidence, never synthesize results. Report is offline and has no API calls."""
 
+import csv
 import html
+import io
 import json
 from pathlib import Path
 
@@ -13,7 +15,59 @@ def pretty(value):
     return escape(json.dumps(value, ensure_ascii=False, indent=2))
 
 
+def generate_coverage_csv(report: dict) -> str:
+    output = io.StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(["run_id", "test_id", "run_name", "type_name", "field_name", "coordinate", "hits", "covered", "coverage_percent"])
+    for run in report.get("coverageRuns", []):
+        run_id = run.get("runId", "")
+        test_id = run.get("testId", "")
+        run_name = run.get("name", "")
+        percent = run.get("summary", {}).get("coveragePercent", 0.0)
+        graph = run.get("graph")
+        if graph and isinstance(graph, dict) and "types" in graph:
+            for t in graph["types"]:
+                tname = t.get("name", "")
+                for f in t.get("fields", []):
+                    fname = f.get("name", "")
+                    coord = f"{tname}.{fname}"
+                    hits = int(f.get("hits", 0))
+                    covered = bool(f.get("covered", hits > 0))
+                    writer.writerow([run_id, test_id, run_name, tname, fname, coord, hits, covered, percent])
+        elif "finalFieldHits" in run and isinstance(run["finalFieldHits"], dict):
+            for coord, hits in sorted(run["finalFieldHits"].items()):
+                tname, _, fname = coord.partition(".")
+                writer.writerow([run_id, test_id, run_name, tname, fname, coord, hits, hits > 0, percent])
+    return output.getvalue()
+
+
+def generate_test_matrix_csv(report: dict) -> str:
+    output = io.StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(["test_id", "test_title", "status", "duration_sec", "run_id", "covered_fields_count", "covered_coordinates"])
+    coverage_runs = report.get("coverageRuns", [])
+    for test in report.get("tests", []):
+        test_id = test.get("id", "")
+        title = test.get("title", "")
+        status = test.get("status", "")
+        duration = round(float(test.get("duration", 0)), 3)
+        matching = [r for r in coverage_runs if r.get("testId") == test_id]
+        if matching:
+            for r in matching:
+                selected = sorted(k for k, v in r.get("finalFieldHits", {}).items() if v)
+                writer.writerow([test_id, title, status, duration, r.get("runId", ""), len(selected), "; ".join(selected)])
+        else:
+            writer.writerow([test_id, title, status, duration, "", 0, ""])
+    return output.getvalue()
+
+
 def write_report(report, path: Path):
+    path = Path(path)
+    csv_text = generate_coverage_csv(report)
+    path.with_name("coverage.csv").write_text(csv_text, encoding="utf-8")
+    matrix_text = generate_test_matrix_csv(report)
+    path.with_name("test-matrix.csv").write_text(matrix_text, encoding="utf-8")
+
     tests = report["tests"]
     counts = {s: sum(t["status"] == s for t in tests) for s in ("passed", "failed", "skipped")}
     requests = sum(e["kind"] == "request" for t in tests for e in t["events"])
@@ -61,7 +115,8 @@ def write_report(report, path: Path):
       <title>API tests · отчёт</title><style>
       *{{box-sizing:border-box}}body{{margin:0;background:#f3f5f8;color:#203048;font:15px/1.5 system-ui}}main{{max-width:1250px;margin:auto;padding:36px 24px}}header{{border-top:5px solid #315bdb;padding-top:20px}}h1{{font-size:36px;margin:8px 0}}p,.muted{{color:#65738a}}.metrics{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:24px 0}}.metric{{background:white;padding:18px;border:1px solid #dce3ec;border-radius:10px}}.metric b{{font-size:30px;display:block}}.toolbar{{margin:24px 0}}button{{border:1px solid #ccd6e6;border-radius:6px;background:white;color:#23416d;padding:9px 16px;cursor:pointer;margin:4px}}button[aria-pressed=true]{{background:#23416d;color:white}}.case{{border:1px solid #dce3ec;border-left:4px solid #27966e;border-radius:8px;background:white;margin:12px 0}}.case.failed{{border-left-color:#d84252}}.case.skipped{{border-left-color:#b08a20}}summary{{cursor:pointer;padding:17px;list-style-position:inside}}.case>summary{{font-weight:650}}.pill{{font-size:12px;padding:4px 8px;background:#e5f5ed;color:#226b4b;border-radius:5px;margin-right:10px}}.failed .pill{{color:#ac2238;background:#ffeaed}}.skipped .pill{{color:#8a6415;background:#fff4cf}}.duration,.request summary span{{float:right;font-size:12px;color:#6b7990}}.content{{padding:0 20px 20px}}code{{font:12px Consolas,monospace;overflow-wrap:anywhere}}pre{{font:12px/1.6 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:380px;overflow:auto;background:#eef2f7;border-radius:5px;padding:12px;margin:5px 0}}.request{{margin:14px 0;background:#f8faff;border:1px solid #dce3ec;border-radius:6px}}.columns,.values{{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:0 12px 12px}}h4{{margin:10px 0}}.check{{border-top:1px solid #e8edf3;padding:12px 0}}.check strong{{font-size:14px}}.pass strong{{color:#227b55}}.fail strong{{color:#ba2840}}.values{{padding:5px 0 0;font-size:12px;color:#65738a}}.failure{{background:#fff0f1;color:#9e2438}}footer{{padding:24px 0;color:#65738a;font-size:13px}}@media(max-width:650px){{.columns,.values{{grid-template-columns:1fr}}.metrics{{grid-template-columns:1fr 1fr}}.duration,.request summary span{{float:none;display:block}}}}
       </style><main><header><div class="muted">HTTP / GRAPHQL · РЕЗУЛЬТАТЫ ЗАПУСКА</div><h1>Что API действительно сделал</h1>
-      <p>{escape(report['label'])}<br>ID запуска: <code>{escape(report.get('id', ''))}</code><br>Адрес: <code>{escape(report['endpoint'])}</code><br>Backend commit: <code>{escape((report.get('backend') or {}).get('commit') or 'не определён')}</code> · локальные изменения: {escape((report.get('backend') or {}).get('dirty'))}<br>Начало (UTC): {escape(report['startedAt'])} · код завершения: {report['exitCode']}</p><a href="../../index.html">История запусков</a></header>{infra}
+      <p>{escape(report['label'])}<br>ID запуска: <code>{escape(report.get('id', ''))}</code><br>Адрес: <code>{escape(report['endpoint'])}</code><br>Начало (UTC): {escape(report['startedAt'])} · код завершения: {report['exitCode']}</p>
+      <p><a href="coverage.csv" download>Скачать покрытие (CSV)</a> · <a href="test-matrix.csv" download>Матрица Тест-Поле (CSV)</a> · <a href="../../index.html">История запусков</a></p></header>{infra}
       <div class="metrics"><div class="metric"><b>{counts['passed']}/{len(tests)}</b>сценариев пройдено</div>
       <div class="metric"><b>{counts['failed']}</b>с ошибками · {counts['skipped']} пропущено</div>
       <div class="metric"><b>{requests}</b>реальных HTTP-запросов</div><div class="metric"><b>{passed_checks}/{len(checks)}</b>проверок пройдено</div></div>
