@@ -1,4 +1,3 @@
-"""Schema identity, labels, stored SDL, graph metadata and service history."""
 import json
 from uuid import UUID, uuid5
 

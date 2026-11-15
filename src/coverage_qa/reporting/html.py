@@ -1,5 +1,3 @@
-"""Render evidence, never synthesize results. Report is offline and has no API calls."""
-
 import csv
 import html
 import io
@@ -15,29 +13,49 @@ def pretty(value):
     return escape(json.dumps(value, ensure_ascii=False, indent=2))
 
 
+def final_measurement(run):
+    checkpoints = run.get("checkpoints") or []
+    snapshot = checkpoints[-1] if checkpoints else run
+    graph = snapshot.get("graph") or {}
+    percent = graph.get("summary", snapshot.get("summary", {})).get("coveragePercent")
+    if "types" in graph:
+        hits = {f"{t['name']}.{f['name']}": f["hits"]
+                for t in graph["types"] for f in t["fields"]}
+    else:
+        hits = snapshot.get("fieldHits", snapshot.get("finalFieldHits"))
+    return hits, percent
+
+
+def run_owners(report):
+    tests = report.get("tests", [])
+    known_ids = {test["id"] for test in tests}
+    observed = {}
+    for test in tests:
+        for event in test.get("events", []):
+            if event.get("kind") == "coverage":
+                observed.setdefault(event["runId"], set()).add(test["id"])
+    owners = {}
+    for run in report.get("coverageRuns", []):
+        rid = run["runId"]
+        if run.get("testId") in known_ids:
+            owners[rid] = run["testId"]
+        elif len(observed.get(rid, ())) == 1:
+            owners[rid] = next(iter(observed[rid]))
+    return owners
+
+
 def generate_coverage_csv(report: dict) -> str:
     output = io.StringIO()
     writer = csv.writer(output, lineterminator="\n")
     writer.writerow(["run_id", "test_id", "run_name", "type_name", "field_name", "coordinate", "hits", "covered", "coverage_percent"])
+    owners = run_owners(report)
     for run in report.get("coverageRuns", []):
-        run_id = run.get("runId", "")
-        test_id = run.get("testId", "")
-        run_name = run.get("name", "")
-        percent = run.get("summary", {}).get("coveragePercent", 0.0)
-        graph = run.get("graph")
-        if graph and isinstance(graph, dict) and "types" in graph:
-            for t in graph["types"]:
-                tname = t.get("name", "")
-                for f in t.get("fields", []):
-                    fname = f.get("name", "")
-                    coord = f"{tname}.{fname}"
-                    hits = int(f.get("hits", 0))
-                    covered = bool(f.get("covered", hits > 0))
-                    writer.writerow([run_id, test_id, run_name, tname, fname, coord, hits, covered, percent])
-        elif "finalFieldHits" in run and isinstance(run["finalFieldHits"], dict):
-            for coord, hits in sorted(run["finalFieldHits"].items()):
-                tname, _, fname = coord.partition(".")
-                writer.writerow([run_id, test_id, run_name, tname, fname, coord, hits, hits > 0, percent])
+        rid = run["runId"]
+        hits, percent = final_measurement(run)
+        for coord, count in sorted((hits or {}).items()):
+            type_name, _, field_name = coord.partition(".")
+            writer.writerow([rid, owners.get(rid, ""), run.get("name", ""), type_name, field_name,
+                             coord, count, count > 0, percent])
     return output.getvalue()
 
 
@@ -45,19 +63,21 @@ def generate_test_matrix_csv(report: dict) -> str:
     output = io.StringIO()
     writer = csv.writer(output, lineterminator="\n")
     writer.writerow(["test_id", "test_title", "status", "duration_sec", "run_id", "covered_fields_count", "covered_coordinates"])
-    coverage_runs = report.get("coverageRuns", [])
-    for test in report.get("tests", []):
-        test_id = test.get("id", "")
-        title = test.get("title", "")
-        status = test.get("status", "")
-        duration = round(float(test.get("duration", 0)), 3)
-        matching = [r for r in coverage_runs if r.get("testId") == test_id]
-        if matching:
-            for r in matching:
-                selected = sorted(k for k, v in r.get("finalFieldHits", {}).items() if v)
-                writer.writerow([test_id, title, status, duration, r.get("runId", ""), len(selected), "; ".join(selected)])
-        else:
-            writer.writerow([test_id, title, status, duration, "", 0, ""])
+    tests = {test["id"]: test for test in report.get("tests", [])}
+    owners = run_owners(report)
+    for run in report.get("coverageRuns", []):
+        rid = run["runId"]
+        owner = owners.get(rid, "")
+        test = tests.get(owner, {})
+        hits, _ = final_measurement(run)
+        selected = sorted(coord for coord, count in (hits or {}).items() if count)
+        duration = round(test["duration"], 3) if "duration" in test else None
+        writer.writerow([owner, test.get("title"), test.get("status"), duration, rid,
+                         len(selected) if hits is not None else None, "; ".join(selected)])
+    linked = set(owners.values())
+    for owner, test in tests.items():
+        if owner not in linked:
+            writer.writerow([owner, test.get("title"), test.get("status"), round(test.get("duration", 0), 3), "", "", ""])
     return output.getvalue()
 
 

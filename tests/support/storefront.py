@@ -1,5 +1,3 @@
-"""Real browser shop → BFF → unchanged Coverage Proxy → commerce PostgreSQL."""
-
 import hashlib
 import json
 import os
@@ -26,7 +24,13 @@ def storefront(request, business_stack):
     server = None
     browser = context = page = None
     token = None
-    previous_orders = set()
+    created_orders = set()
+
+    def remember_order(body):
+        data = body.get("data") if isinstance(body, dict) else None
+        order = data.get("createOrder") if isinstance(data, dict) else None
+        if isinstance(order, dict) and order.get("id"):
+            created_orders.add(order["id"])
     slug = "shop-" + evidence_id(request.node.nodeid)
 
     def direct(query, variables=None):
@@ -35,13 +39,13 @@ def storefront(request, business_stack):
                                 headers={"Authorization": "Bearer " + token} if token else {})
         api.expect("Проверочное чтение: HTTP", status, 200)
         api.expect("Проверочное чтение: нет GraphQL errors", body.get("errors", []), [])
+        remember_order(body)
         return body["data"]
 
     try:
         run.prepare(request.node.nodeid)
         token = direct('mutation($password:String!){login(email:"alice@example.test",password:$password){token}}',
                        {"password": "test-password-2026"})["login"]["token"]
-        previous_orders = {x["id"] for x in direct("{orders{id}}")["orders"]}
         server = Server("examples.shop.web.server:app", ROOT, request.config.run_folder / (slug + ".log"), {
             "SHOP_GRAPHQL_URL": business_stack.proxy.base + "/graphql",
             "SHOP_COVERAGE_API_KEY": business_stack.key, "SHOP_COVERAGE_RUN_ID": run.run_id,
@@ -65,7 +69,6 @@ def storefront(request, business_stack):
                     pytest.skip("Браузер Playwright не установлен. Запустите: python -m playwright install chromium")
                 raise
             context = browser.new_context(viewport={"width": 1440, "height": 1050})
-            context.tracing.start(screenshots=True, snapshots=True, sources=False)
             page = context.new_page()
             starts = {}
 
@@ -81,6 +84,7 @@ def storefront(request, business_stack):
                     body = response.json()
                 except Exception:
                     body = {"rawResponse": response.text()}
+                remember_order(body)
                 event = {"kind": "request", "title": "Магазин: " + (payload.get("operationName") or "GraphQL"),
                          "method": "POST", "url": response.url, "request": redact(payload), "response": redact(body),
                          "headers": {"Authorization": "<redacted>"} if "authorization" in response.request.headers else {},
@@ -101,26 +105,20 @@ def storefront(request, business_stack):
             entry["transport"] = "browser → storefront → coverage-proxy → commerce-api"
             entry["target"] = server.base
             try:
-                yield SimpleNamespace(page=page, api=api, direct=direct, run=run)
+                yield SimpleNamespace(page=page, api=api, direct=direct, run=run, remember_order=remember_order)
             finally:
                 if page:
                     image_name = slug + ".png"
                     page.screenshot(path=str(request.config.run_folder / image_name), full_page=True)
                     entry["events"].append({"kind": "attachment", "title": "Магазин: результат браузерного сценария", "path": image_name})
-                if context:
-                    trace_name = slug + ".zip"
-                    context.tracing.stop(path=str(request.config.run_folder / trace_name))
-                    entry["events"].append({"kind": "attachment", "title": "Магазин: Playwright trace", "path": trace_name})
                 if browser:
                     browser.close()
     finally:
         try:
             if server:
                 server.stop()
-            if token:
-                for order in direct("{orders{id}}")["orders"]:
-                    if order["id"] not in previous_orders:
-                        direct("mutation($id:ID!){cancelOrder(id:$id){id status}}", {"id": order["id"]})
+            for order_id in created_orders:
+                direct("mutation($id:ID!){cancelOrder(id:$id){id status}}", {"id": order_id})
         finally:
             if run.run_id:
                 run.finish()

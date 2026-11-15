@@ -1,5 +1,3 @@
-"""Public HTTP contracts only. Expected fields are supplied by test scenarios."""
-
 import hashlib
 import json
 import urllib.parse
@@ -38,13 +36,14 @@ class CoverageRun:
         self.new_phase(test_id, "Основной")
 
     def new_phase(self, test_id, name):
+        node_id = self.api.entry["id"]
         run = self.rest("Создать прогон: " + name, "POST", "/api/runs",
                         {"snapshotId": self.snapshot_id, "name": (name + ": " + test_id)[-200:],
-                         "metadata": {"testRunId": self.report["id"], "pytestNodeId": test_id}}, expected=201)
+                         "metadata": {"testRunId": self.report["id"], "pytestNodeId": node_id}}, expected=201)
         self.run_id = run["id"]
         self.finished = False
         self.seen_requests = set()
-        self.record = {"testId": test_id, "serviceId": self.service_id, "snapshotId": self.snapshot_id,
+        self.record = {"testId": node_id, "serviceId": self.service_id, "snapshotId": self.snapshot_id,
                        "runId": self.run_id, "schemaHash": self.schema_hash,
                        "name": name, "exchanges": [], "checkpoints": [], "requestDetails": {}}
         self.report["coverageRuns"].append(self.record)

@@ -1,5 +1,3 @@
-"""Append-only run directories; a mutable index points to immutable evidence."""
-
 import html
 import json
 import shutil
@@ -52,7 +50,6 @@ def update_history(folder, report):
                      "coverageRuns": report.get("coverageRuns", []), "backend": report.get("backend")})
     save_json(manifest_path, manifest)
     root = folder.parent.parent
-    # Older reports are preserved in place; only these navigation files change.
     rows = []
     for path in sorted((root / "runs").glob("*/manifest.json"), reverse=True):
         m = json.loads(path.read_text(encoding="utf-8"))

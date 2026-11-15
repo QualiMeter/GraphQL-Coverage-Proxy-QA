@@ -1,5 +1,3 @@
-"""One set of business scenarios runs over direct and proxy HTTP transports."""
-
 from pathlib import Path
 from coverage_qa.environment import ROOT
 from uuid import uuid4
@@ -34,7 +32,6 @@ class BusinessClient:
         self.login("alice")
 
     def login(self, account, password="test-password-2026"):
-        # Credentials are obtained directly; tests can separately exercise login over the selected transport.
         status, body = self.api.http("Войти как " + account, "POST", self.stack.upstream.base + "/graphql", auth=False,
                                      payload={"query": "mutation Login($email:String!,$password:String!){login(email:$email,password:$password){token user{id role}}}",
                                               "variables": {"email": account + "@example.test", "password": password}})

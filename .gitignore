@@ -1,14 +1,44 @@
+# Virtual environments
 .venv/
+venv/
+ENV/
+
+# Python cache & artifacts
 __pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+
+# Testing & reports
 .pytest_cache/
 .tmp/
 reports/
+.coverage
+/coverage/
+htmlcov/
+*.log
+
+# Browsers & Playwright
 .browsers/
+test-results/
+playwright-report/
+
+# Node / JS
+node_modules/
+
+# Secrets & Environment
 .env
 .env.*
 !.env.example
 
-*.egg-info/
-build/
-dist/
-node_modules/
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.bak
+.DS_Store
+Thumbs.db

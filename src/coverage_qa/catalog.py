@@ -1,4 +1,3 @@
-"""Group scenarios by location, independent of test file names."""
 from pathlib import Path
 
 

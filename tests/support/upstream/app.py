@@ -1,5 +1,3 @@
-"""Controlled test server, not a replacement for the team's backend/frontend."""
-
 import asyncio
 import gzip
 import json
@@ -39,7 +37,6 @@ async def health():
 
 @app.get("/__test/calls")
 async def inspect_calls():
-    # Test-generated credentials are never returned or logged.
     return calls
 
 
@@ -78,5 +75,4 @@ async def execute(request: Request):
 
 @app.get("/browser", response_class=HTMLResponse)
 async def browser_fixture():
-    # Same-origin bridge is bound to one test run on the Python test runner.
     return Path(__file__).with_name("browser.html").read_text(encoding="utf-8")

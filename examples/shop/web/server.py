@@ -1,5 +1,3 @@
-"""Separate demo storefront. Forwards GraphQL to our commerce API only."""
-
 import argparse
 import os
 from contextlib import asynccontextmanager
@@ -45,9 +43,11 @@ async def config(request: Request):
 
 @app.post("/api/graphql")
 async def graphql_proxy(request: Request):
-    body = await request.body()
-    if len(body) > 1024 * 1024:
-        return JSONResponse({"errors": [{"message": "Request too large"}]}, status_code=413)
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > 1024 * 1024:
+            return JSONResponse({"errors": [{"message": "Request too large"}]}, status_code=413)
+        body.extend(chunk)
     headers = {"Content-Type": "application/json"}
     if request.app.state.coverage_key:
         headers["X-Coverage-Api-Key"] = request.app.state.coverage_key
@@ -56,7 +56,7 @@ async def graphql_proxy(request: Request):
     if request.headers.get("authorization"):
         headers["Authorization"] = request.headers["authorization"]
     try:
-        upstream = await request.app.state.client.post(request.app.state.target, content=body, headers=headers)
+        upstream = await request.app.state.client.post(request.app.state.target, content=bytes(body), headers=headers)
     except httpx.TimeoutException:
         return JSONResponse({"errors": [{"message": "GraphQL API timed out"}]}, status_code=504)
     except httpx.HTTPError:

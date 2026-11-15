@@ -1,4 +1,3 @@
-"""Fresh-checkout portability; no Docker or network required."""
 import pytest
 
 from coverage_qa.environment import CoverageStack, find_backend

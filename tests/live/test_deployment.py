@@ -1,5 +1,3 @@
-"""GET-only deployment checks. No services, sessions, runs or mutations are created."""
-
 from uuid import UUID, uuid4
 
 import httpx

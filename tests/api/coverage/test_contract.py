@@ -1,5 +1,3 @@
-"""Independent black-box acceptance tests for the unchanged coverage backend."""
-
 from uuid import uuid4
 
 import pytest
@@ -38,7 +36,7 @@ def test_empty_and_schema_deduplication(coverage_run):
 
 
 @pytest.mark.case("Демонстрация: базовый → расширенный → повторный прогон с сохранением истории")
-def test_demo_three_runs(coverage_run):
+def test_demo_three_runs(coverage_run, request):
     r = coverage_run
     records = []
     for index, name in enumerate(("Базовый", "Расширенный", "Повторный")):
@@ -70,6 +68,8 @@ def test_demo_three_runs(coverage_run):
     r.api.expect("История содержит три независимых прогона", len({c["graph"]["runId"] for c in records}), 3)
     history = r.rest("Прочитать историю с сервера", "GET", f"/api/runs?snapshotId={r.snapshot_id}")
     r.api.expect("Все три запуска сохранены", {x["id"] for x in history} == {c["graph"]["runId"] for c in records}, True)
+    r.api.expect("Каждая фаза принадлежит исходному pytest-тесту",
+                 [row["metadata"]["pytestNodeId"] for row in history], [request.node.nodeid] * 3)
     for checkpoint in records:
         run_id = checkpoint["graph"]["runId"]
         saved = r.rest("Проверить неизменность завершённого прогона", "GET", f"/api/runs/{run_id}/coverage")

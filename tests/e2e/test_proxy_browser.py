@@ -1,5 +1,3 @@
-"""One browser E2E against a test-only page; team's UI is never changed."""
-
 import json
 import os
 import threading
@@ -71,7 +69,6 @@ def test_browser_exchange(coverage_run, request):
                     pytest.skip("Браузер Playwright не установлен. Запустите: python -m playwright install chromium")
                 raise
             context = browser.new_context(viewport={"width": 1100, "height": 700})
-            context.tracing.start(screenshots=True, snapshots=True, sources=False)
             page = context.new_page()
             page.goto(f"http://127.0.0.1:{server.server_port}/")
             page.get_by_role("button", name="Получить пользователя").click()
@@ -87,9 +84,6 @@ def test_browser_exchange(coverage_run, request):
                 if page:
                     page.screenshot(path=str(folder / "browser.png"), full_page=True)
                     run.api.entry["events"].append({"kind": "attachment", "title": "Результат браузерного сценария", "path": "browser.png"})
-                if context:
-                    context.tracing.stop(path=str(folder / "browser-trace.zip"))
-                    run.api.entry["events"].append({"kind": "attachment", "title": "Playwright trace", "path": "browser-trace.zip"})
             finally:
                 if browser:
                     browser.close()

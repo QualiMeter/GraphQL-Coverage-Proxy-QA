@@ -1,5 +1,3 @@
-"""Atomic, redacted execution snapshots consumed by the local control panel."""
-
 import hashlib
 import threading
 import time

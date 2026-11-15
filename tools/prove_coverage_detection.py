@@ -1,5 +1,3 @@
-"""An unchanged acceptance test must reject fabricated coverage in a temporary copy."""
-
 import json
 import shutil
 import subprocess

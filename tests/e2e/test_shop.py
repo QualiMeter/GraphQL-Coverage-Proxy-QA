@@ -1,5 +1,3 @@
-"""Real browser shop → BFF → unchanged Coverage Proxy → commerce PostgreSQL."""
-
 import hashlib
 import json
 import os
@@ -157,9 +155,9 @@ def test_storefront_retry_after_lost_checkout_response(storefront):
         if payload.get("operationName") != "CreateOrder":
             route.continue_()
             return
-        # The real BFF/proxy/API completes the mutation before the browser sees a transport fault.
         response = route.fetch(max_retries=0, max_redirects=0)
         body = response.json()
+        s.remember_order(body)
         s.api.expect("Настоящий API завершил mutation до сбоя ответа", response.status, 200)
         s.api.expect("Mutation не вернула GraphQL errors", body.get("errors", []), [])
         attempts.append({"input": payload["variables"]["input"], "orderId": body["data"]["createOrder"]["id"]})
@@ -188,3 +186,25 @@ def test_storefront_retry_after_lost_checkout_response(storefront):
     operation = next(x for x in checkpoint["operations"] if x["operationName"] == "CreateOrder")
     s.api.expect("Proxy сохранил оба обращения mutation", operation["requestCount"], 2)
     s.api.expect("Покрытие отражает два вызова, а не число заказов", checkpoint["fieldHits"]["Mutation.createOrder"], 2)
+
+@pytest.mark.case("Магазин: временный отказ при восстановлении профиля сохраняет сессию")
+def test_storefront_session_survives_profile_outage(storefront):
+    page = storefront.page
+    login(page)
+    key = "forma-session-v1"
+    original = page.evaluate("(key) => sessionStorage.getItem(key)", key)
+    assert original
+
+    def profile_outage(route):
+        if route.request.post_data_json.get("operationName") == "GetMe":
+            route.fulfill(status=503, content_type="application/json", body="{}")
+        else:
+            route.continue_()
+
+    page.route("**/api/graphql", profile_outage)
+    page.reload()
+    expect(page.locator("#toast")).to_contain_text("503")
+    assert page.evaluate("(key) => sessionStorage.getItem(key) === null", key) is False
+    page.unroute("**/api/graphql", profile_outage)
+    page.reload()
+    expect(page.get_by_role("button", name="Войти", exact=True)).not_to_be_visible()

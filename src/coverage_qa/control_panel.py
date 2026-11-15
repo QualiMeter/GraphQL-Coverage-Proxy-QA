@@ -1,4 +1,4 @@
-"""Loopback-only UI for selecting and executing the real pytest scenarios."""
+"""Loopback HTTP interface for pytest runs."""
 
 import argparse
 import hashlib

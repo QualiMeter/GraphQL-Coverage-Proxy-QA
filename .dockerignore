@@ -1,3 +1,8 @@
+.git
+.gitignore
+.dockerignore
+.gitattributes
+.github
 .venv
 .browsers
 .pytest_cache
@@ -5,6 +10,9 @@
 reports
 __pycache__
 **/__pycache__
-.git
 .env
 .env.*
+node_modules
+*.md
+.idea
+.vscode

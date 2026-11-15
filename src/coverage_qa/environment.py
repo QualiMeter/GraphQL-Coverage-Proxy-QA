@@ -1,5 +1,3 @@
-"""Disposable HTTP processes and PostgreSQL. Team source is only read."""
-
 import os
 import asyncio
 import secrets
@@ -16,7 +14,6 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def find_backend(directory=None):
-    """Resolve a normal sibling checkout, CI checkout, or original ZIP layout."""
     configured = os.environ.get("COVERAGE_BACKEND_DIR")
     if configured:
         return Path(configured).expanduser().resolve()
@@ -33,7 +30,6 @@ TEAM_BACKEND = find_backend()
 
 
 def source_identity(directory):
-    """Record a checkout identity without requiring Git metadata for ZIP inputs."""
     result = {"path": str(Path(directory).resolve()), "commit": None, "dirty": None}
     try:
         commit = subprocess.run(["git", "-C", str(directory), "rev-parse", "HEAD"],

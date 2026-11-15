@@ -1,4 +1,3 @@
-"""Independent HTTP checks for the current journal and analytics contract."""
 import math
 from uuid import uuid4
 
@@ -16,7 +15,6 @@ def send(r, query=QUERY, name="UserInfo", variables=None):
 def page(r, path):
     body = r.rest("Страница с серверным total", "GET", path)
     headers = r.api.entry["events"][-2]["responseHeaders"]
-    # rest appends an HTTP equality check after its request event.
     r.api.expect("Ответ не кешируется", headers.get("cache-control"), "no-store")
     return body, int(headers["x-total-count"])
 

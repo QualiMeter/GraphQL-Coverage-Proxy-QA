@@ -1,4 +1,3 @@
-"""Run from the QA checkout with python -m acceptance.mvp.run."""
 import json
 import os
 import subprocess

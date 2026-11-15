@@ -1,5 +1,3 @@
-"""Control commands, saved evidence, and real subprocess execution/cancellation."""
-
 import hashlib
 import json
 import subprocess

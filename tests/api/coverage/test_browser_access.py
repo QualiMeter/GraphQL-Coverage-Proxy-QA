@@ -1,4 +1,3 @@
-"""Real cookie sessions, roles, CSRF and service grants over HTTP."""
 from uuid import uuid4
 
 import pytest

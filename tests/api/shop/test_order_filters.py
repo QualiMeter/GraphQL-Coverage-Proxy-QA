@@ -1,11 +1,8 @@
-"""Учебный пример: один новый сценарий автоматически проверяется двумя путями."""
-
 import pytest
 
 
 @pytest.mark.case("Отмена заказа: фильтры CANCELLED и CREATED соответствуют сохранённому состоянию")
 def test_cancelled_order_filter(business):
-    # business подготовит API, выполнит вход и после теста уберёт созданный заказ из активных.
     b = business
     order = b.create([{"productId": "cable", "quantity": 1}])
     b.cancel(order["id"])

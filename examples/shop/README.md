@@ -15,7 +15,7 @@ docker compose -p gql-commerce-demo -f examples/shop/compose.yaml up --build -d 
 Откройте http://localhost:9110/. API: POST http://localhost:9100/graphql.
 Для входа выберите Alice, Bob или Admin и нажмите «Войти». Пароль всех вымышленных аккаунтов — `test-password-2026`.
 
-![Витрина FORMA](../../docs/images/storefront.png)
+![Витрина FORMA](../../docs/images/storefront.jpg)
 
 ## Показать работу
 

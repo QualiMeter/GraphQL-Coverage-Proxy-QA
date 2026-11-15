@@ -1,8 +1,11 @@
-"""Shared HTTP evidence client and redaction, independent of pytest hooks."""
 import re
 import time
 import httpx
 from coverage_qa.reporting.progress import emit
+
+class EvidenceMismatch(AssertionError):
+    pass
+
 
 class API:
     def __init__(self, url, entry, key=None):
@@ -61,7 +64,8 @@ class API:
         self.entry["events"].append({"kind": "check", "title": title,
                                       "actual": redact(actual), "expected": redact(expected), "passed": passed})
         emit(force=not passed)
-        assert passed, f"{title}: expected={expected!r}, actual={actual!r}"
+        if not passed:
+            raise EvidenceMismatch(title)
 
 
 INLINE_SECRET_RE = re.compile(
@@ -73,7 +77,7 @@ def redact(value):
     if isinstance(value, str):
         return INLINE_SECRET_RE.sub(r'\1: "<redacted>"', value)
     if isinstance(value, dict):
-        return {k: "<redacted>" if k.lower() in {"password", "token", "accesstoken", "refreshtoken", "secret", "apikey", "csrftoken", "csrf_token"} else redact(v) for k, v in value.items()}
+        return {k: "<redacted>" if k.lower() in {"password", "token", "accesstoken", "refreshtoken", "secret", "apikey", "api_key", "authorization", "cookie", "set-cookie", "x-coverage-api-key", "x-csrf-token", "csrftoken", "csrf_token"} else redact(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [redact(v) for v in value]
     return value

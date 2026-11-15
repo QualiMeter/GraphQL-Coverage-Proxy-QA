@@ -1,4 +1,3 @@
-"""Render verified API checkpoints after the persistence check succeeds."""
 import csv
 import json
 from html import escape

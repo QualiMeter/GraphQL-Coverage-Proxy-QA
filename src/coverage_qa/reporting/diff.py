@@ -1,5 +1,3 @@
-"""Compare two coverage runs to show schema and test coverage growth or regressions."""
-
 from __future__ import annotations
 
 import csv
@@ -11,7 +9,6 @@ from typing import Any
 
 
 def extract_field_hits(run_data: dict[str, Any]) -> dict[str, int]:
-    """Extract coordinate -> hits mapping from various report/run formats."""
     if not isinstance(run_data, dict):
         return {}
     if "fieldHits" in run_data and isinstance(run_data["fieldHits"], dict):
@@ -30,9 +27,10 @@ def extract_field_hits(run_data: dict[str, Any]) -> dict[str, int]:
             return hits
     if "hits" in run_data and isinstance(run_data["hits"], dict):
         return {str(k): int(v) for k, v in run_data["hits"].items()}
-    if "coverageRuns" in run_data and isinstance(run_data["coverageRuns"], list) and run_data["coverageRuns"]:
+    runs = run_data.get("coverageRuns", run_data.get("runs"))
+    if isinstance(runs, list):
         combined = {}
-        for r in run_data["coverageRuns"]:
+        for r in runs:
             for k, v in extract_field_hits(r).items():
                 combined[k] = max(combined.get(k, 0), v)
         return combined
@@ -40,7 +38,6 @@ def extract_field_hits(run_data: dict[str, Any]) -> dict[str, int]:
 
 
 def compare_runs(before_data: dict[str, Any], after_data: dict[str, Any]) -> dict[str, Any]:
-    """Compare two runs and return detailed coverage and hit differentials."""
     hits_before = extract_field_hits(before_data)
     hits_after = extract_field_hits(after_data)
 
@@ -85,6 +82,18 @@ def compare_runs(before_data: dict[str, Any], after_data: dict[str, Any]) -> dic
     }
 
 
+def hit_status(before: int, after: int) -> tuple[str, str]:
+    if before == after:
+        return ("maintained", "Без изменений") if after else ("uncovered", "Не покрыто")
+    if before == 0:
+        return "newly_covered", "Впервые покрыто"
+    if after == 0:
+        return "dropped", "Покрытие потеряно"
+    if after < before:
+        return "decrease", "Снижение обращений"
+    return "growth", "Рост обращений"
+
+
 def format_diff_markdown(diff: dict[str, Any]) -> str:
     s = diff["summary"]
     lines = [
@@ -98,11 +107,7 @@ def format_diff_markdown(diff: dict[str, Any]) -> str:
     for coord, delta in sorted(diff["hitsDeltas"].items()):
         hb = diff["hitsBefore"].get(coord, 0)
         ha = diff["hitsAfter"].get(coord, 0)
-        status = "Впервые покрыто" if coord in diff["newlyCovered"] else (
-            "Рост обращений" if delta > 0 else (
-                "Без изменений" if ha > 0 else "Не покрыто"
-            )
-        )
+        _, status = hit_status(hb, ha)
         lines.append(f"| `{coord}` | {hb} | {ha} | {delta:+d} | {status} |")
     return "\n".join(lines)
 
@@ -114,11 +119,7 @@ def format_diff_csv(diff: dict[str, Any]) -> str:
     for coord, delta in sorted(diff["hitsDeltas"].items()):
         hb = diff["hitsBefore"].get(coord, 0)
         ha = diff["hitsAfter"].get(coord, 0)
-        status = "newly_covered" if coord in diff["newlyCovered"] else (
-            "growth" if delta > 0 else (
-                "maintained" if ha > 0 else "uncovered"
-            )
-        )
+        status, _ = hit_status(hb, ha)
         writer.writerow([coord, hb, ha, delta, status])
     return output.getvalue()
 
@@ -126,7 +127,7 @@ def format_diff_csv(diff: dict[str, Any]) -> str:
 def load_run_data(target: str | Path) -> dict[str, Any]:
     path = Path(target)
     if path.is_dir():
-        for candidate in ("coverage.json", "results.json", "field-usage.json", "manifest.json"):
+        for candidate in ("coverage.json", "results.json", "field-usage.json"):
             if (path / candidate).exists():
                 return json.loads((path / candidate).read_text(encoding="utf-8"))
         raise FileNotFoundError(f"No coverage files found in directory {path}")

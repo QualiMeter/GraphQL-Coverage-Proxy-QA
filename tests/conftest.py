@@ -1,5 +1,3 @@
-"""HTTP evidence and a standalone report. No imports from the API implementation."""
-
 import json
 import os
 import re
@@ -110,6 +108,8 @@ def pytest_runtest_makereport(item, call):
         item.config.api_report["tests"].append(entry)
     entry["duration"] += result.duration
     if result.failed:
+        if call.excinfo and isinstance(call.excinfo.value, EvidenceMismatch):
+            result.longrepr = f"{item.nodeid}: {call.excinfo.value}"
         entry["status"] = "failed"
         entry["failure"] = result.longreprtext
     elif result.skipped and entry["status"] != "failed":
@@ -142,7 +142,7 @@ def pytest_sessionfinish(session, exitstatus):
     print(f"\nAPI report: {folder / 'index.html'}")
 
 
-from tests.support.http_client import API, redact, ensure_entry
+from tests.support.http_client import API, EvidenceMismatch, redact, ensure_entry
 
 
 @pytest.fixture

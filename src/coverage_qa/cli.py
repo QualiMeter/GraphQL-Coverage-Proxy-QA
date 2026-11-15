@@ -1,4 +1,3 @@
-"""Single command for tests, the control panel and saved reports."""
 import sys
 
 

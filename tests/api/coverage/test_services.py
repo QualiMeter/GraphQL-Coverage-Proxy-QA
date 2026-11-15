@@ -1,4 +1,3 @@
-"""Real per-service routing and outbound restrictions through public HTTP APIs."""
 from uuid import uuid4
 
 import pytest

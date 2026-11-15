@@ -1,20 +1,20 @@
 # Сверка backend, frontend и QA
 
-Дата сверки: 15 ноября 2026 года. Проверены удалённые main и чистые checkout. Ветки с незавершёнными изменениями не объявляются релизом.
+Дата сверки: 16 ноября 2026 года. Версии ниже соответствуют проверенным локальным checkout.
 
 | Часть | Проверенная версия | Способ проверки |
 | --- | --- | --- |
-| Backend | `e6504cb892081f3a99d21eac825967478f45cfde` | Исходники, контракты и настоящие HTTP-запросы к процессу с временной PostgreSQL |
-| Frontend | `70c9f130be438d0d666a9644be39f0649bb62b97` | Чтение точки входа, источника данных и моделей; без изменения кода и без заявления о полном UI E2E |
+| Backend | `7c7f09354623d6d03ca64453d93daf944a7c62c3` | Исходники, контракты и настоящие HTTP-запросы к процессу с временной PostgreSQL |
+| Frontend | `386880265b4d63769f2f49857376e8776bc751ff` | Чтение точки входа, источника данных и моделей; без изменения кода и без заявления о полном UI E2E |
 | QA | Эта feature-ветка | Локальный all и GitHub Actions; конкретный backend commit сохраняется в результатах каждого управляемого прогона |
 
 ## Контракты, по которым сверяемся
 
-- [Backend API](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/e6504cb892081f3a99d21eac825967478f45cfde/docs/frontend-api.md).
-- [Cookie/roles/CSRF](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/e6504cb892081f3a99d21eac825967478f45cfde/docs/frontend-auth.md).
-- [Multi-service routing](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/e6504cb892081f3a99d21eac825967478f45cfde/docs/frontend-multi-service.md).
-- [Журнал и история](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/e6504cb892081f3a99d21eac825967478f45cfde/docs/frontend-history-requests.md).
-- [Актуальное дополнение: P95, AST и метаданные схемы](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/e6504cb892081f3a99d21eac825967478f45cfde/docs/frontend-final-features.md).
+- [Backend API](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/7c7f09354623d6d03ca64453d93daf944a7c62c3/docs/frontend-api.md).
+- [Cookie/roles/CSRF](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/7c7f09354623d6d03ca64453d93daf944a7c62c3/docs/frontend-auth.md).
+- [Multi-service routing](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/7c7f09354623d6d03ca64453d93daf944a7c62c3/docs/frontend-multi-service.md).
+- [Журнал и история](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/7c7f09354623d6d03ca64453d93daf944a7c62c3/docs/frontend-history-requests.md).
+- [Актуальное дополнение: P95, AST и метаданные схемы](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/7c7f09354623d6d03ca64453d93daf944a7c62c3/docs/frontend-final-features.md).
 
 Документы разных этапов нужно читать вместе: например, отсутствие safeGraphqlDocument в описании этапа 4 отменено дополнением этапа 5. QA использует актуальные DTO, а не старый текст Swagger description одного маршрута.
 
@@ -50,7 +50,7 @@
 
 ## Frontend: что требуется для подключения
 
-В проверенном `src/main.tsx` при `VITE_DATA_SOURCE=api` показывается сообщение ожидания контракта; обычный AnalyticsApp работает с локальным store. Старый `src/App.tsx` имеет другой data source, но не является текущей точкой входа. Поэтому этот QA не объявляет основной frontend соединённым с backend.
+В версии 3868802 React использует cookie-сессию и серверные сервисы, снимки, граф и SDL. История и метрики прогонов работают на локальном демонстрационном источнике.
 
 Важные соответствия для будущего API-адаптера:
 
@@ -69,14 +69,12 @@
 
 Порядок подключения для фронтенд-разработчика:
 
-1. Заменить заглушку API-режима на отдельный адаптер с относительными `/api/...`.
-2. Подключить `/api/auth/session`, вход/выход, Origin и X-CSRF-Token для изменений. Ключ Coverage API остаётся только на сервере/в CLI.
-3. Подключить service → snapshot → run без смешения UUID и отображаемых названий.
-4. Подключить graph/coverage/stats, затем историю, фильтры журнала и detail.
-5. Добавить настоящий E2E основного frontend после появления API-адаптера. Текущие E2E относятся к тестовой странице proxy и FORMA.
+1. Связать выбранный серверный снимок с историей его прогонов.
+2. Подключить покрытие и статистику по runId, затем операции и журнал с учётом прав.
+3. Проверить один и тот же runId через браузер и REST в сценарии TST-07.
 
 ## Границы
 
-Полный DNS-rebinding/SSRF/resource-limit аудит, concurrency races авторизации, last-admin и TLS/Nginx остаются в специализированном наборе backend. Frontend здесь только сопоставлен с контрактом, его build/test и настоящее browser E2E не заявлены выполненными. Это дополнение к командным наборам, а не замена их тестов.
+Полный DNS-rebinding/SSRF/resource-limit аудит, concurrency races авторизации, last-admin и TLS/Nginx остаются в специализированном наборе backend. Frontend проверен отдельно через lint, Vitest и production-сборку. Сквозная проверка TST-07 остаётся открытой. Это дополнение к командным наборам, а не замена их тестов.
 
 Source identity фиксируется в `results.json`, `manifest.json` и HTML: путь, commit, dirty-флаг. При ZIP без Git commit явно не определён. Для точного повторения используйте сохранённый backend commit и `requirements.lock.txt`.

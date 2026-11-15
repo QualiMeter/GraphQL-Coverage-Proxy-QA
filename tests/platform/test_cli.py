@@ -1,4 +1,3 @@
-"""CLI contracts after the package and directory reorganization."""
 import json
 import subprocess
 import sys

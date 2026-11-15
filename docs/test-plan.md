@@ -1,6 +1,6 @@
 # Требования и проверки
 
-Основа — публичный контракт и исходники backend main `e6504cb892081f3a99d21eac825967478f45cfde`. Ссылки на поддерживаемые endpoints и границы проверки перечислены в [backend-compatibility.md](backend-compatibility.md).
+Основа — публичный контракт и исходники backend main `7c7f09354623d6d03ca64453d93daf944a7c62c3`. Ссылки на поддерживаемые endpoints и границы проверки перечислены в [backend-compatibility.md](backend-compatibility.md).
 
 | Требование | Сценарий | Доказательство |
 |---|---|---|
@@ -19,7 +19,7 @@
 | Доступ | unauthorized | Без ключа запросы отклоняются; ключ не передаётся в браузер/upstream |
 | Сохранение в БД | persistence_after_restart | После перезапуска собственного тестового backend-процесса граф и запросы те же |
 | Сетевые сбои | network_failure, upstream_timeout | 502/504, без выдуманных полей/наблюдений |
-| Браузерный E2E | browser_exchange | Клик, HTTP через proxy, ответ на странице, наблюдение в PostgreSQL; PNG и trace |
+| Браузерный E2E | browser_exchange | Клик, HTTP через proxy, ответ на странице, наблюдение в PostgreSQL; PNG |
 
 ## Самостоятельный бизнес-API
 

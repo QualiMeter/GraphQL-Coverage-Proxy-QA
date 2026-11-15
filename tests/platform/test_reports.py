@@ -1,5 +1,3 @@
-"""Evidence/history invariants: reports must survive the next execution."""
-
 import json
 import pytest
 import threading
@@ -33,7 +31,6 @@ def test_previous_run_survives_next_execution(tmp_path):
     assert json.loads((tmp_path / "latest.json").read_text())["id"] == second.name
     index = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert first.name in index and second.name in index
-    # A Windows reader can hold a non-delete-sharing handle briefly during polling.
     shared = tmp_path / "shared.json"
     save_json(shared, {"version": 1})
     opened, release = threading.Event(), threading.Event()
@@ -155,3 +152,68 @@ def test_compare_runs_coverage_diff():
     csv_data = format_diff_csv(diff)
     assert "Mutation.createOrder,0,1,1,newly_covered" in csv_data
 
+
+@pytest.mark.case("CSV: последняя контрольная точка, дополнительные фазы и старые runId")
+def test_export_checkpoint_and_ownership():
+    import csv
+    import io
+    from coverage_qa.reporting.html import generate_coverage_csv, generate_test_matrix_csv
+
+    graph = {"summary": {"coveragePercent": 50}, "types": [
+        {"name": "Query", "fields": [{"name": "a", "hits": 2}, {"name": "b", "hits": 0}]}
+    ]}
+    report = {
+        "tests": [{"id": "parent", "events": [{"kind": "coverage", "runId": "phase"}]}],
+        "coverageRuns": [
+            {"runId": "phase", "testId": "legacy-label", "finalFieldHits": {"wrong": 9},
+             "summary": {"coveragePercent": 100}, "checkpoints": [{"graph": graph}]},
+            {"runId": "orphan", "testId": "unknown", "checkpoints": []},
+        ],
+    }
+    fields = list(csv.DictReader(io.StringIO(generate_coverage_csv(report))))
+    assert [(row["test_id"], row["coordinate"], row["hits"], row["coverage_percent"]) for row in fields] == [
+        ("parent", "Query.a", "2", "50"), ("parent", "Query.b", "0", "50")]
+    matrix = list(csv.DictReader(io.StringIO(generate_test_matrix_csv(report))))
+    assert [(row["test_id"], row["run_id"], row["covered_coordinates"]) for row in matrix] == [
+        ("parent", "phase", "Query.a"), ("", "orphan", "")]
+    assert matrix[1]["covered_fields_count"] == ""
+
+
+@pytest.mark.case("Diff различает снижение hits и потерю покрытия")
+def test_diff_decreases():
+    from coverage_qa.reporting.diff import compare_runs, format_diff_csv, format_diff_markdown
+
+    diff = compare_runs({"coverageRuns": [{"finalFieldHits": {"Query.a": 3, "Query.b": 1}}]},
+                        {"runs": [{"finalFieldHits": {"Query.a": 1, "Query.b": 0}}]})
+    assert "Query.a,3,1,-2,decrease" in format_diff_csv(diff)
+    assert "Query.b,1,0,-1,dropped" in format_diff_csv(diff)
+    assert "Снижение обращений" in format_diff_markdown(diff)
+    assert "Покрытие потеряно" in format_diff_markdown(diff)
+
+
+@pytest.mark.case("Ошибка сравнения не раскрывает токен в HTML, JSON и JUnit")
+def test_failed_comparison_artifacts(tmp_path):
+    import subprocess
+    import sys
+    from coverage_qa.environment import ROOT
+
+    source = tmp_path / "test_mismatch.py"
+    marker = "synthetic-token-for-failure-test"
+    source.write_text(
+        "def test_mismatch(api):\n"
+        f"    api.expect('Ответ сессии', {{'token': '{marker}'}}, {{'token': 'other'}})\n",
+        encoding="utf-8",
+    )
+    junit = tmp_path / "junit.xml"
+    finished = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "tests.conftest", str(source),
+         "--report-dir", str(tmp_path / "reports"), f"--junitxml={junit}"],
+        cwd=ROOT, capture_output=True, timeout=60,
+    )
+    assert finished.returncode == 1, finished.stdout.decode(errors="replace")
+    folder, = (tmp_path / "reports" / "runs").iterdir()
+    report = json.loads((folder / "results.json").read_text(encoding="utf-8"))
+    assert report["tests"][0]["status"] == "failed"
+    assert report["tests"][0]["events"][-1]["actual"]["token"] == "<redacted>"
+    for path in (folder / "results.json", folder / "index.html", junit):
+        assert marker not in path.read_text(encoding="utf-8")
