@@ -169,6 +169,7 @@ def coverage_stack(request):
         stack = CoverageStack(config.run_folder, config.getoption("--coverage-backend-dir") or TEAM_BACKEND)
         try:
             stack.start()
+            config.api_report["backend"] = stack.identity
             config.api_report["endpoint"] = stack.proxy.base + "/graphql"
             yield stack
         finally:
@@ -214,6 +215,7 @@ def business_stack(request):
     stack = CoverageStack(folder, request.config.getoption("--coverage-backend-dir") or TEAM_BACKEND, commerce=True)
     try:
         stack.start()
+        request.config.api_report["backend"] = stack.identity
         request.config.api_report["endpoint"] = f"{stack.upstream.base}/graphql (business direct); {stack.proxy.base}/graphql (business proxy)"
         yield stack
     finally:

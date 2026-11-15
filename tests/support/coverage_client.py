@@ -24,10 +24,10 @@ class CoverageRun:
         self.api.expect(title + ": HTTP", status, expected)
         return body
 
-    def prepare(self, test_id):
+    def prepare(self, test_id, *, endpoint=None):
         service = self.rest("Зарегистрировать отдельный тестовый сервис", "POST", "/api/services",
                             {"key": "test-" + uuid4().hex, "name": test_id[-200:],
-                             "endpointUrl": self.stack.upstream.base + "/graphql"}, expected=201)
+                             "endpointUrl": endpoint or self.stack.upstream.base + "/graphql"}, expected=201)
         self.service_id = service["id"]
         snapshot = self.rest("Получить настоящую схему через introspection", "POST", "/api/schemas/import/introspection",
                              {"serviceId": self.service_id}, expected=201)
@@ -45,7 +45,7 @@ class CoverageRun:
         self.seen_requests = set()
         self.record = {"testId": test_id, "serviceId": self.service_id, "snapshotId": self.snapshot_id,
                        "runId": self.run_id, "schemaHash": self.schema_hash,
-                       "name": name, "exchanges": [], "checkpoints": []}
+                       "name": name, "exchanges": [], "checkpoints": [], "requestDetails": {}}
         self.report["coverageRuns"].append(self.record)
         self.api.entry["coverageContext"] = {k: self.record[k] for k in ("runId", "snapshotId", "serviceId")}
 
@@ -72,13 +72,33 @@ class CoverageRun:
             exchange["observedRequestIds"] = sorted(new_ids)
             exchange["attribution"] = "single-request-delta" if len(new_ids) == 1 else "none-or-ambiguous"
             self.seen_requests.update(new_ids)
+            exchange["requestDetails"] = [self.request_detail(id) for id in sorted(new_ids)]
+            if len(new_ids) == 1:
+                self.attach_detail(exchange, exchange["requestDetails"][0])
         return status, body
+
+    def request_detail(self, id):
+        details = self.record["requestDetails"]
+        if id not in details:
+            details[id] = self.rest("Фактические поля отдельного запроса", "GET",
+                                    f"/api/runs/{self.run_id}/requests/{id}")
+        return details[id]
+
+    def attach_detail(self, exchange, detail):
+        exchange["actualSelectedFields"] = sorted(f"{f['typeName']}.{f['fieldName']}" for f in detail["selectedFields"])
+        exchange["countedInCoverage"] = detail["countedInCoverage"]
+        event = self.api.entry["events"][exchange["eventIndex"]]
+        event["observedRequestId"] = detail["id"]
+        event["actualSelectedFields"] = exchange["actualSelectedFields"]
+        event["countedInCoverage"] = detail["countedInCoverage"]
 
     def snapshot(self, title):
         graph = self.rest(title + ": покрытие", "GET", f"/api/runs/{self.run_id}/coverage")
         operations = self.rest(title + ": поля операций", "GET", f"/api/runs/{self.run_id}/operations")
         requests = self.rest(title + ": обращения", "GET", f"/api/runs/{self.run_id}/requests?limit=500")
+        details = [self.request_detail(row["id"]) for row in requests]
         checkpoint = {"title": title, "graph": graph, "operations": operations, "requests": requests,
+                      "requestDetails": details,
                       "fieldHits": field_hits(graph)}
         self.record["checkpoints"].append(checkpoint)
         for exchange in self.record["exchanges"]:
@@ -87,6 +107,11 @@ class CoverageRun:
                 key = hashlib.sha256(json.dumps(identity, ensure_ascii=True, separators=(",", ":")).encode()).hexdigest()
                 if key == operation["operationKey"]:
                     exchange["observedOperationKey"] = key
+                    matching = [d for d in details if d["operationKey"] == key]
+                    if "observedRequestIds" not in exchange and len(matching) == 1:
+                        exchange["observedRequestIds"] = [matching[0]["id"]]
+                        exchange["attribution"] = "unique-operation-request"
+                        self.attach_detail(exchange, matching[0])
                     exchange["observedOperationAggregate"] = {
                         "scope": "operation-across-run-not-single-request",
                         "requestCount": operation["requestCount"],

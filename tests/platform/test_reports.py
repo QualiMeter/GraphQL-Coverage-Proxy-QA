@@ -86,3 +86,4 @@ def test_credentials_are_redacted_without_altering_runtime_response():
     masked_inline = redact(inline)
     assert "inline-secret-pass" not in masked_inline["query"]
     assert '<redacted>' in masked_inline["query"]
+    assert redact({"csrfToken": "csrf-secret"})["csrfToken"] == "<redacted>"

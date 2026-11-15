@@ -38,7 +38,7 @@ class API:
             except ValueError:
                 body = response.text
             event["response"] = redact(body)
-            event["responseHeaders"] = {k: v for k, v in response.headers.items() if k.lower() in {"content-type", "content-encoding", "cache-control"}}
+            event["responseHeaders"] = {k: v for k, v in response.headers.items() if k.lower() in {"content-type", "content-encoding", "cache-control", "x-total-count"}}
             return response.status_code, body
         except httpx.HTTPError as exc:
             event["error"] = str(exc)
@@ -73,7 +73,7 @@ def redact(value):
     if isinstance(value, str):
         return INLINE_SECRET_RE.sub(r'\1: "<redacted>"', value)
     if isinstance(value, dict):
-        return {k: "<redacted>" if k.lower() in {"password", "token", "accesstoken", "refreshtoken", "secret", "apikey"} else redact(v) for k, v in value.items()}
+        return {k: "<redacted>" if k.lower() in {"password", "token", "accesstoken", "refreshtoken", "secret", "apikey", "csrftoken", "csrf_token"} else redact(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [redact(v) for v in value]
     return value

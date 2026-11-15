@@ -32,6 +32,22 @@ def find_backend(directory=None):
 TEAM_BACKEND = find_backend()
 
 
+def source_identity(directory):
+    """Record a checkout identity without requiring Git metadata for ZIP inputs."""
+    result = {"path": str(Path(directory).resolve()), "commit": None, "dirty": None}
+    try:
+        commit = subprocess.run(["git", "-C", str(directory), "rev-parse", "HEAD"],
+                                capture_output=True, text=True, timeout=5)
+        if commit.returncode == 0:
+            result["commit"] = commit.stdout.strip()
+            status = subprocess.run(["git", "-C", str(directory), "status", "--porcelain", "--untracked-files=no"],
+                                    capture_output=True, text=True, timeout=5)
+            result["dirty"] = bool(status.stdout.strip()) if status.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return result
+
+
 def free_port():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -86,7 +102,7 @@ class CoverageStack:
         self.folder, self.backend_dir = Path(folder), Path(backend_dir)
         self.project = "gqltests" + secrets.token_hex(6)
         self.key = secrets.token_hex(32)
-        self.upstream = self.proxy = None
+        self.upstream = self.secondary = self.proxy = None
         self.compose_started = False
         self.commerce = commerce
         self.command = ["docker", "compose", "-p", self.project, "-f", str(ROOT / "tests" / "support" / "compose.yaml")]
@@ -95,6 +111,7 @@ class CoverageStack:
         if not (self.backend_dir / "alembic.ini").is_file():
             raise RuntimeError("Coverage backend not found. Clone GraphQL-Coverage-Proxy-Beckend next to QA, "
                                "set COVERAGE_BACKEND_DIR, or pass --coverage-backend-dir <checkout>.")
+        self.identity = source_identity(self.backend_dir)
         with (self.folder / "infrastructure.log").open("a", encoding="utf-8") as log:
             subprocess.run(["docker", "info"], stdout=log, stderr=subprocess.STDOUT, check=True, timeout=15)
             self.compose_started = True
@@ -117,8 +134,13 @@ class CoverageStack:
             self.upstream = Server("examples.shop.api.app:app" if self.commerce else "tests.support.upstream.app:app", ROOT,
                                    self.folder / ("commerce.log" if self.commerce else "upstream.log"), upstream_env)
             self.upstream.start()
+            origins = [self.upstream.base]
+            if not self.commerce:
+                self.secondary = Server("tests.support.upstream.app:app", ROOT, self.folder / "secondary-upstream.log",
+                                        {"QA_UPSTREAM_NAME": "Secondary upstream"}).start()
+                origins.append(self.secondary.base)
             env = {"DATABASE_URL": self.database_url, "TARGET_GRAPHQL_URL": self.upstream.base + "/graphql",
-                   "COVERAGE_DEV_UPSTREAM_ORIGINS": self.upstream.base,
+                   "COVERAGE_DEV_UPSTREAM_ORIGINS": ",".join(origins),
                    "COVERAGE_API_KEY": self.key, "CORS_ORIGINS": "", "COVERAGE_DEV_MODE": "true",
                    "COVERAGE_PUBLIC_ORIGIN": "http://localhost:5173", "PYTHONDONTWRITEBYTECODE": "1"}
             subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=self.backend_dir,
@@ -129,7 +151,7 @@ class CoverageStack:
 
     def close(self):
         errors = []
-        for server in (self.proxy, self.upstream):
+        for server in (self.proxy, self.upstream, self.secondary):
             if server:
                 try:
                     server.stop()

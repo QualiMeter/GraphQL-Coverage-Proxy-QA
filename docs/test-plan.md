@@ -1,6 +1,6 @@
 # Требования и проверки
 
-Основа: концепция заказчика и разделы 6, 10, 11 рабочего ТЗ `../message.txt`. Документ Backend Integration v2 — проект согласования; его будущие возможности не выдаются за уже реализованные требования текущего API.
+Основа — публичный контракт и исходники backend main `e6504cb892081f3a99d21eac825967478f45cfde`. Ссылки на поддерживаемые endpoints и границы проверки перечислены в [backend-compatibility.md](backend-compatibility.md).
 
 | Требование | Сценарий | Доказательство |
 |---|---|---|
@@ -45,9 +45,20 @@
 - Метрика описывает выбранные поля запроса при успешном анализе и объекте data. Частичный ответ с errors может учитываться; тест не объявляет это успешным исполнением каждого резолвера.
 - Fragments поддерживаются тестовым upstream, но текущим анализатором помечаются unsupported. Это проверяется явно.
 - Сетевые ошибки и таймауты не записываются текущим обработчиком как ObservedRequest. Тест фиксирует контракт, а не придумывает запись.
-- `/requests` не возвращает координаты каждого отдельного обращения. Тестовый отчёт связывает запрос с новым ID наблюдения через разницу списков запросов изолированного прогона; фактические поля берутся из `/coverage` и `/operations`. `declaredSelectedFields` — независимое ожидание, не результат измерения. Для повторяющихся операций поля сервера доступны агрегировано.
+- Список `/requests` не содержит selectedFields; detail `/requests/{requestId}` содержит фактические поля и countedInCoverage. Отчёт сохраняет оба уровня и сопоставляет HTTP-вызов с detail только при однозначной связи. `declaredSelectedFields` остаётся независимым ожиданием, а не измерением.
 - Связь с pytestNodeId хранится в metadata прогона и артефактах тестов; новые колонки БД не добавляются.
-- Актуальный backend принимает endpointUrl каждого сервиса и ограничивает исходящие подключения. Стенд регистрирует реальный локальный endpoint и разрешает только его origin через COVERAGE_DEV_UPSTREAM_ORIGINS. Этот набор проверяет изоляцию записей, но не заявляет полную проверку всех новых SSRF-правил, разных upstream и расширенных фильтров; соответствующие проверки есть в репозитории backend.
-- Проверки browser-cookie ролей/CSRF шире базовой API-key интеграции этого набора и остаются в существующих тестах команды. Авторизационный smoke и отсутствие утечки ключа проверяются здесь.
+- Multi-service проверяется двумя настоящими upstream с разными ответами. Проверяются опасные URL и отсутствие обхода endpoint через introspection payload. Полный DNS-rebinding/SSRF/resource-limit аудит остаётся за специализированными тестами backend.
+- Cookie-сессии viewer/analyst/operator, CSRF, grants, отзыв grant, скрытая metadata и logout проверяются по HTTP. TLS/Secure-cookie через production Nginx, last-admin и конкурентные security races остаются в специализированном наборе backend. Основной frontend этим набором не открывается.
 
 Тесты не изменяют командный backend/frontend. Тестовый upstream и HTML для одного E2E находятся в `tests/support/upstream/`; бизнес-API и витрина — в `examples/shop/`.
+
+## Расширенный контракт backend
+
+| Файл | Проверки |
+| --- | --- |
+| `tests/api/coverage/test_journal.py` | Request detail, operationKey, безопасный AST, фильтры AND, pagination/total, неверные фильтры, status counts, avg и P95 |
+| `tests/api/coverage/test_schema_metadata.py` | SDL, displayName/dedup, неизменность identity, custom roots, interfaces/unions, аргументы/default redaction, relation UUIDv5, история нескольких snapshots |
+| `tests/api/coverage/test_services.py` | Два реальных upstream, изоляция, опасные endpoints и запрет URL override introspection |
+| `tests/api/coverage/test_browser_access.py` | Настоящие сессии и роли, CSRF, выдача/отзыв grant, journal ACL, закрытая metadata, logout |
+
+Тесты используют независимые ожидания DTO и бизнес-результатов. Статистика сверяется с реальными durations журнала; P95 вычисляется линейной интерполяцией в тесте. Код анализатора, ORM и функции API backend не импортируются.

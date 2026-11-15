@@ -49,7 +49,7 @@ def update_history(folder, report):
                      "passed": sum(t["status"] == "passed" for t in report["tests"]),
                      "failed": sum(t["status"] == "failed" for t in report["tests"]),
                      "skipped": sum(t["status"] == "skipped" for t in report["tests"]),
-                     "coverageRuns": report.get("coverageRuns", [])})
+                     "coverageRuns": report.get("coverageRuns", []), "backend": report.get("backend")})
     save_json(manifest_path, manifest)
     root = folder.parent.parent
     # Older reports are preserved in place; only these navigation files change.

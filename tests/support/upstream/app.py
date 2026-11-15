@@ -3,6 +3,7 @@
 import asyncio
 import gzip
 import json
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -15,7 +16,7 @@ schema = build_schema(SDL)
 products = [{"id": "10", "title": "Keyboard"}, {"id": "20", "title": "Mouse"}]
 orders = [{"id": "1", "total": 50.0}]
 calls = []
-schema.get_type("Query").fields["user"].resolve = lambda _, info, id: {"id": "1", "name": "Anna", "orders": list(orders)} if id == "1" else None
+schema.get_type("Query").fields["user"].resolve = lambda _, info, id: {"id": "1", "name": os.environ.get("QA_UPSTREAM_NAME", "Anna"), "orders": list(orders)} if id == "1" else None
 schema.get_type("Query").fields["products"].resolve = lambda *_: products
 
 
