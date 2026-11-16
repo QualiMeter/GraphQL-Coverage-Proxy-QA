@@ -12,7 +12,7 @@ const saved=readStorage(localStorage,'forma-cart-v1',{items:{},key:null});
 const S={products:[],me:null,token:readStorage(sessionStorage,'forma-session-v1',null),cart:saved.items||{},checkoutKey:saved.key||null,category:'all',sort:'default',filter:'',orders:[],orderStatus:null,requests:[],selectedRequest:null,checkoutBusy:false,loginBusy:false,nextPage:null,cancelId:null,lastOrder:null,orderSeq:0};
 function el(tag,text,cls){const node=document.createElement(tag);if(text!==undefined&&text!==null)node.textContent=String(text);if(cls)node.className=cls;return node}
 function icon(name){const svg=document.createElementNS(NS,'svg'),use=document.createElementNS(NS,'use');use.setAttribute('href','#i-'+name);svg.append(use);return svg}
-function art(product){const info=meta[product.id];if(!info)return el('div','FORMA','generic-art');const img=el('img');img.src='/assets/'+info.image;img.alt=product.name;return img}
+function art(product){const info=meta[product.id];if(!info)return el('div','FORMA','generic-art');const img=el('img');img.src='assets/'+info.image;img.alt=product.name;return img}
 function show(id){if(!$(id).open)$(id).showModal()}
 function close(id){$(id).close()}
 function toast(text,error=false){const box=$('toast');box.textContent=text;box.className='toast'+(error?' error':'');clearTimeout(toast.timer);toast.timer=setTimeout(()=>box.classList.add('hidden'),5500)}
@@ -26,7 +26,7 @@ async function request(title,query,variables={},operationName=null,{auth=true}={
   const started=performance.now(),sessionToken=S.token;
   try{
     const headers={'Content-Type':'application/json'};if(auth&&sessionToken)headers.Authorization='Bearer '+sessionToken;
-    const response=await fetch('/api/graphql',{method:'POST',headers,body:JSON.stringify({query,variables,operationName}),signal:AbortSignal.timeout(45000)});
+    const response=await fetch('api/graphql',{method:'POST',headers,body:JSON.stringify({query,variables,operationName}),signal:AbortSignal.timeout(45000)});
     item.http=response.status;const raw=await response.text();let body;try{body=JSON.parse(raw)}catch{body={rawResponse:raw}}
     if(auth&&sessionToken!==S.token){const error=new Error('Сессия изменилась.');error.code='SESSION_CHANGED';throw error}
     item.response=redact(body);
@@ -77,4 +77,4 @@ for(const button of document.querySelectorAll('[data-category]'))button.onclick=
 for(const button of document.querySelectorAll('[data-order-status]'))button.onclick=safe(async()=>{S.orderStatus=button.dataset.orderStatus||null;for(const b of document.querySelectorAll('[data-order-status]'))b.classList.toggle('active',b===button);await loadOrders()});
 $('sort').onchange=()=>{S.sort=$('sort').value;renderCatalog()};$('search').oninput=()=>{S.filter=$('search').value;if(route()!=='catalog')go('catalog');renderCatalog()};window.addEventListener('hashchange',safe(renderRoute));
 (async()=>{renderHeader();await safe(loadCatalog)();if(S.token){try{const data=await request('Восстановление сессии',queries.me,{},'GetMe');if(data.me){S.me=data.me;renderHeader()}else{clearSession()}}catch(error){toast(error.message,true)}}await safe(renderRoute)()})();
-fetch('/api/config').then(r=>r.json()).then(config=>{if(config.coverageEnabled)document.querySelector('.inspector-note').textContent=`Запросы проходят через Coverage Proxy. Прогон: ${config.runId}. Пароли и токены скрыты; реальные поля сохраняются на сервере.`}).catch(()=>{});
+fetch('api/config').then(r=>r.json()).then(config=>{const qaLink=document.getElementById('qa-panel-link');if(qaLink&&config.qaPanelUrl)qaLink.href=config.qaPanelUrl;if(config.coverageEnabled)document.querySelector('.inspector-note').textContent=`Запросы проходят через Coverage Proxy. Прогон: ${config.runId}. Пароли и токены скрыты; реальные поля сохраняются на сервере.`}).catch(()=>{});
