@@ -38,7 +38,8 @@ async def index():
 @app.get("/api/config")
 async def config(request: Request):
     return {"coverageEnabled": bool(request.app.state.coverage_key and request.app.state.run_id),
-            "runId": request.app.state.run_id}
+            "runId": request.app.state.run_id,
+            "qaPanelUrl": os.environ.get("SHOP_QA_PANEL_URL", "http://localhost:9020/")}
 
 
 @app.post("/api/graphql")
