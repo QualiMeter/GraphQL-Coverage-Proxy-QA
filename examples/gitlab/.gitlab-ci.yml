@@ -1,0 +1,67 @@
+# ==============================================================================
+# Enterprise Template: GitLab CI Integration with GraphQL Coverage Proxy
+# ==============================================================================
+#
+# How to use:
+# 1. Place this file (or include its jobs) in your project repository.
+# 2. Add CI/CD variables in GitLab (Settings > CI/CD > Variables):
+#      - COVERAGE_URL: URL of your GraphQL Coverage Proxy (e.g. http://proxy.company.internal:8000)
+#      - COVERAGE_API_KEY: Secret API key for authentication with the proxy (Masked)
+# 3. All GraphQL test traffic routing through the proxy will automatically track
+#    schema coverage.
+# 4. The quality-gate job evaluates the threshold, creates a JUnit XML report,
+#    and outputs the coverage percentage for the GitLab MR badge.
+# ==============================================================================
+
+stages:
+  - test
+  - quality-gate
+
+variables:
+  COVERAGE_URL: "http://coverage-proxy.internal:8000"
+  COVERAGE_MIN_PERCENT: "80.0"
+
+# ------------------------------------------------------------------------------
+# Test execution stage
+# ------------------------------------------------------------------------------
+run-integration-tests:
+  stage: test
+  image: python:3.12-slim
+  script:
+    - pip install -r requirements.txt
+    - |
+      # Execute your test suite pointing GraphQL client to $COVERAGE_URL/graphql
+      pytest -v --junitxml=reports/tests.xml
+  artifacts:
+    when: always
+    reports:
+      junit: reports/tests.xml
+
+# ------------------------------------------------------------------------------
+# Quality Gate Stage: Evaluates schema coverage and breaks build if below threshold
+# ------------------------------------------------------------------------------
+verify-graphql-coverage:
+  stage: quality-gate
+  image: python:3.12-slim
+  before_script:
+    - pip install graphql-coverage-qa
+  script:
+    - |
+      coverage-qa gitlab gate \
+        --coverage-url "$COVERAGE_URL" \
+        --api-key "$COVERAGE_API_KEY" \
+        --run-id "${COVERAGE_RUN_ID:-$CI_PIPELINE_IID}" \
+        --min-coverage "$COVERAGE_MIN_PERCENT" \
+        --junit-out reports/coverage-junit.xml \
+        --csv-out reports/coverage-fields.csv \
+        --summary-out reports/coverage-summary.json
+  # GitLab native coverage regex:
+  coverage: '/Total coverage:\s*([0-9.]+)%/'
+  artifacts:
+    when: always
+    reports:
+      junit: reports/coverage-junit.xml
+    paths:
+      - reports/coverage-junit.xml
+      - reports/coverage-fields.csv
+      - reports/coverage-summary.json

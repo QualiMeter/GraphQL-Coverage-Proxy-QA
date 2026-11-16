@@ -10,9 +10,10 @@ def main():
         "clean": "reporting.cleanup",
         "audit": "security",
         "offline": "offline_demo",
+        "gitlab": "gitlab_ci",
     }
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
-        print("Usage: coverage-qa {test|panel|reports|preflight|clean|audit|offline} [options]\nUse coverage-qa COMMAND --help for details.")
+        print("Usage: coverage-qa {test|panel|reports|preflight|clean|audit|offline|gitlab} [options]\nUse coverage-qa COMMAND --help for details.")
         return 0
     command = sys.argv.pop(1)
     if command not in commands:

@@ -1,0 +1,104 @@
+# ==============================================================================
+# GitLab CI Pipeline for GraphQL Coverage Proxy & QA
+#
+# Supported architectures:
+# Option A (Recommended): Observer Mode
+#   Tests run inside this runner. All GraphQL requests route through the proxy.
+#   Quality Gate checks the coverage threshold and exports JUnit XML + coverage regex.
+#
+# Option B: Remote Trigger Mode
+#   TestLab or webhooks trigger this pipeline with variable COVERAGE_RUN_ID.
+# ==============================================================================
+
+stages:
+  - preflight
+  - test
+  - quality-gate
+
+variables:
+  PYTHON_VERSION: "3.12"
+  COVERAGE_URL: "http://coverage-proxy:8000"
+  COVERAGE_MIN_PERCENT: "80.0"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PLAYWRIGHT_BROWSERS_PATH: "$CI_PROJECT_DIR/.browsers"
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .cache/pip
+    - .browsers
+
+# ------------------------------------------------------------------------------
+# Stage 1: Preflight Lint & Hygiene
+# ------------------------------------------------------------------------------
+lint-and-hygiene:
+  stage: preflight
+  image: python:3.12-slim
+  before_script:
+    - python -V
+    - pip install -r requirements.txt
+    - pip install -e . --no-deps
+  script:
+    - python -m coverage_qa preflight --quick
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'
+
+# ------------------------------------------------------------------------------
+# Stage 2: Execute Tests Through GraphQL Coverage Proxy
+# ------------------------------------------------------------------------------
+run-api-tests:
+  stage: test
+  image: python:3.12-slim
+  before_script:
+    - pip install -r requirements.lock.txt
+    - pip install -e . --no-deps
+  script:
+    - echo "Executing tests against proxy: $COVERAGE_URL"
+    - python -m coverage_qa test --suite all --report-dir reports/
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - reports/
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'
+
+# ------------------------------------------------------------------------------
+# Stage 3: GraphQL Coverage Quality Gate & GitLab Reporting
+# ------------------------------------------------------------------------------
+graphql-coverage-gate:
+  stage: quality-gate
+  image: python:3.12-slim
+  before_script:
+    - pip install -r requirements.txt
+    - pip install -e . --no-deps
+  script:
+    - |
+      RUN_ID="${COVERAGE_RUN_ID:-latest}"
+      python -m coverage_qa gitlab gate \
+        --coverage-url "$COVERAGE_URL" \
+        --api-key "$COVERAGE_API_KEY" \
+        --run-id "$RUN_ID" \
+        --min-coverage "$COVERAGE_MIN_PERCENT" \
+        --junit-out reports/junit.xml \
+        --csv-out reports/coverage.csv \
+        --summary-out reports/coverage-summary.json
+  # GitLab native coverage regex parsing:
+  coverage: '/Total coverage:\s*([0-9.]+)%/'
+  artifacts:
+    when: always
+    expire_in: 30 days
+    reports:
+      junit: reports/junit.xml
+    paths:
+      - reports/junit.xml
+      - reports/coverage.csv
+      - reports/coverage-summary.json
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'

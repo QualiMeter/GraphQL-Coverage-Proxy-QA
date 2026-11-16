@@ -239,6 +239,23 @@ class StartRequest(BaseModel):
     deployed_run_id: str | None = Field(default=None, max_length=100)
 
 
+class GitLabTriggerRequest(BaseModel):
+    project_id: str = Field(min_length=1, max_length=200)
+    token: str = Field(min_length=1, max_length=200)
+    ref: str = Field(default="main", min_length=1, max_length=100)
+    host: str = Field(default="https://gitlab.com", max_length=200)
+    coverage_run_id: str | None = Field(default=None, max_length=80)
+    coverage_url: str | None = Field(default=None, max_length=200)
+    min_coverage: float = Field(default=80.0, ge=0.0, le=100.0)
+
+
+class GitLabGateRequest(BaseModel):
+    run_id: str = Field(min_length=1, max_length=80)
+    coverage_url: str | None = Field(default=None, max_length=200)
+    api_key: str | None = Field(default=None, max_length=200)
+    min_coverage: float = Field(default=80.0, ge=0.0, le=100.0)
+
+
 def create_app(manager=None):
     manager = manager or Manager()
     app = FastAPI(title="GraphQL Test Control")
@@ -314,6 +331,48 @@ def create_app(manager=None):
     def cancel(id: str):
         manager.cancel(id)
         return {"status": "cancel-requested"}
+
+    @app.post("/api/gitlab/trigger")
+    def gitlab_trigger(payload: GitLabTriggerRequest):
+        from coverage_qa.gitlab_ci import GitLabClient
+        client = GitLabClient(host=payload.host, token=payload.token)
+        variables = {}
+        if payload.coverage_run_id:
+            variables["COVERAGE_RUN_ID"] = payload.coverage_run_id
+        if payload.coverage_url:
+            variables["COVERAGE_PROXY_URL"] = payload.coverage_url
+        variables["MIN_COVERAGE"] = str(payload.min_coverage)
+        try:
+            pipeline = client.trigger_pipeline(
+                project_id=payload.project_id,
+                ref=payload.ref,
+                token=payload.token,
+                variables=variables,
+            )
+            return {"status": "triggered", "pipeline": pipeline}
+        except Exception as exc:
+            raise HTTPException(502, f"GitLab API error: {exc}") from exc
+
+    @app.get("/api/gitlab/pipelines/{project_id}/{pipeline_id}")
+    def gitlab_pipeline_status(project_id: str, pipeline_id: str, token: str | None = None, host: str | None = None):
+        from coverage_qa.gitlab_ci import GitLabClient
+        client = GitLabClient(host=host, token=token)
+        try:
+            return client.get_pipeline(project_id=project_id, pipeline_id=pipeline_id, token=token)
+        except Exception as exc:
+            raise HTTPException(502, f"GitLab status error: {exc}") from exc
+
+    @app.post("/api/gitlab/gate")
+    def gitlab_coverage_gate(payload: GitLabGateRequest):
+        from coverage_qa.gitlab_ci import CoverageQualityGate
+        url = payload.coverage_url or os.environ.get("COVERAGE_URL", "http://localhost:8000")
+        key = payload.api_key or os.environ.get("COVERAGE_API_KEY", "")
+        gate = CoverageQualityGate(coverage_url=url, api_key=key)
+        try:
+            evaluation = gate.evaluate(payload.run_id, min_coverage=payload.min_coverage)
+            return evaluation.to_dict()
+        except Exception as exc:
+            raise HTTPException(502, f"Coverage Gate evaluation error: {exc}") from exc
 
     app.mount("/assets", StaticFiles(directory=WEB), name="panel-assets")
     app.mount("/reports", StaticFiles(directory=manager.reports, html=True), name="reports")
