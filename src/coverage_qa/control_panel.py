@@ -194,7 +194,11 @@ def create_app(manager=None):
                 from fastapi.responses import JSONResponse
                 return JSONResponse({"detail": "Перезагрузите панель: отсутствует токен управления"}, status_code=403)
             origin = request.headers.get("Origin")
-            if origin and origin not in {f"http://localhost:{request.url.port}", f"http://127.0.0.1:{request.url.port}"}:
+            allowed_origins = {f"http://localhost:{request.url.port}", f"http://127.0.0.1:{request.url.port}"}
+            public_origin = os.environ.get("QA_PANEL_PUBLIC_ORIGIN", "").strip().rstrip("/")
+            if public_origin:
+                allowed_origins.add(public_origin)
+            if origin and origin not in allowed_origins:
                 from fastapi.responses import JSONResponse
                 return JSONResponse({"detail": "Команды разрешены только из локальной панели"}, status_code=403)
         response = await call_next(request)

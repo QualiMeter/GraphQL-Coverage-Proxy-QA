@@ -1,0 +1,18 @@
+[Unit]
+Description=GraphQL Coverage QA Test Control
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/graphql-coverage-qa
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=QA_PANEL_PUBLIC_ORIGIN=https://graphql.rebyte.fun
+Environment=COVERAGE_BACKEND_DIR=/opt/graphql-coverage
+ExecStart=/opt/graphql-coverage-qa/.venv/bin/coverage-qa panel --port 9020
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
