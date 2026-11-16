@@ -17,10 +17,21 @@ from coverage_qa.reporting.progress import emit, evidence_id
 
 
 @pytest.fixture
-def storefront(request, business_stack):
+def storefront(request):
+    deployed_run_id = request.config.getoption("--deployed-run-id")
+    if deployed_run_id:
+        # No disposable Docker stack in this mode: use the real, controlled demo shop.
+        business_stack = SimpleNamespace(
+            proxy=SimpleNamespace(base=request.config.getoption("--coverage-url").rstrip("/")),
+            upstream=SimpleNamespace(base=request.config.getoption("--upstream-url").rstrip("/")),
+            key=os.environ["COVERAGE_API_KEY"],
+        )
+    else:
+        business_stack = request.getfixturevalue("business_stack")
     entry = ensure_entry(request)
     api = API(business_stack.proxy.base + "/graphql", entry, business_stack.key)
     run = CoverageRun(api, business_stack, request.config.api_report, total_fields=35)
+    run.deployed = bool(deployed_run_id)
     server = None
     browser = context = page = None
     token = None
@@ -43,7 +54,17 @@ def storefront(request, business_stack):
         return body["data"]
 
     try:
-        run.prepare(request.node.nodeid)
+        if deployed_run_id:
+            # Attach to a running Coverage session; never create or finish the user's run.
+            run.run_id = deployed_run_id
+            run.record = {"testId": request.node.nodeid, "serviceId": None,
+                          "snapshotId": None, "runId": run.run_id, "schemaHash": None,
+                          "name": "FORMA Demo Shop · E2E", "exchanges": [],
+                          "checkpoints": [], "requestDetails": {}}
+            request.config.api_report["coverageRuns"].append(run.record)
+            entry["coverageContext"] = {"runId": run.run_id}
+        else:
+            run.prepare(request.node.nodeid)
         token = direct('mutation($password:String!){login(email:"alice@example.test",password:$password){token}}',
                        {"password": "test-password-2026"})["login"]["token"]
         server = Server("examples.shop.web.server:app", ROOT, request.config.run_folder / (slug + ".log"), {
@@ -121,6 +142,9 @@ def storefront(request, business_stack):
                 direct("mutation($id:ID!){cancelOrder(id:$id){id status}}", {"id": order_id})
         finally:
             if run.run_id:
-                run.finish()
+                if run.deployed:
+                    run.finished = True  # report phase only; production run stays active
+                else:
+                    run.finish()
                 run.snapshot("Фактическое покрытие браузерного магазина")
             api.client.close()

@@ -3,12 +3,10 @@
 Цель: открыть уже существующую панель запуска Playwright/API-тестов по
 `https://graphql.rebyte.fun/qa/`, не меняя основной интерфейс Coverage Proxy.
 
-> Важно: в текущем режиме QA runner **намеренно создаёт временные PostgreSQL,
-> Coverage Proxy и магазин**. Его проценты покрытия и история хранятся в
-> QA-отчётах и **не появляются автоматически** в рабочем
-> `https://graphql.rebyte.fun/coverage/`. Подключение runner к уже
-> развернутому сервису FORMA Demo Shop — отдельная интеграция. Нельзя выдавать
-> готовую панель за готовый production coverage run.
+> Обычный режим QA создаёт временные PostgreSQL, Coverage Proxy и магазин.
+> Опциональный режим «FORMA · рабочее покрытие» направляет **только браузерные
+> E2E** в настоящий `/graphql` и существующий активный прогон FORMA Demo Shop.
+> Эти режимы независимы; ключ Coverage остаётся на VPS.
 
 ## 0. Подготовка
 
@@ -138,3 +136,68 @@ sudo journalctl -u graphql-qa-panel -n 80 --no-pager
 - Не публикуйте `/etc/nginx/.graphql-qa-htpasswd`, токены и ключи Coverage.
 - Basic Auth защищает веб-доступ, но не заменяет обновления сервера и
   ограничения административного доступа к VPS.
+
+## 6. Подключение рабочего прогона FORMA Demo Shop (опционально)
+
+Рабочий режим требует уже запущенного магазина по
+`http://127.0.0.1:9100/graphql`, существующего Coverage Proxy по
+`https://graphql.rebyte.fun` и **активного** прогона сервиса с ключом
+`forma-demo-shop`. Нельзя использовать UUID другого сервиса или
+завершённого прогона.
+
+Прежде чем включать режим, убедитесь, что shop API доступен с VPS:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:9100/graphql -H 'Content-Type: application/json' -d '{"query":"{ __typename }"}'
+```
+
+Сначала проверьте наличие unit-параметра
+`EnvironmentFile=-/etc/graphql-qa-panel.env` в обновлённом
+`deploy/systemd/graphql-qa-panel.service`. После этого создайте
+приватный файл (без пароля в командной строке или shell history):
+
+```bash
+sudo install -m 600 -o root -g root /dev/null /etc/graphql-qa-panel.env
+sudo nano /etc/graphql-qa-panel.env
+```
+
+Внутри файла:
+
+```ini
+QA_DEPLOYED_COVERAGE_URL=https://graphql.rebyte.fun
+QA_DEPLOYED_SHOP_API_URL=http://127.0.0.1:9100
+COVERAGE_API_KEY=ВСТАВЬТЕ_СЕКРЕТНЫЙ_КЛЮЧ_ВРУЧНУЮ
+```
+
+Этот администраторский ключ нельзя отправлять в чат, коммитить, класть
+в `/qa/assets/`, передавать через URL или браузер. Настраивать его должен
+владелец сервера; QA только использует уже разрешённый секрет из systemd.
+Файл должен иметь права `root:root 0600`.
+
+Обновите unit и перезапустите панель:
+
+```bash
+sudo cp /opt/graphql-coverage-qa/deploy/systemd/graphql-qa-panel.service /etc/systemd/system/graphql-qa-panel.service
+sudo systemctl daemon-reload
+sudo systemctl restart graphql-qa-panel
+sudo systemctl status graphql-qa-panel --no-pager
+```
+
+Затем в браузере:
+
+1. Откройте `/coverage/`, выберите FORMA Demo Shop, снимок `da132443`
+   и создайте **новый активный прогон** либо возьмите UUID уже активного.
+2. В `/qa/` включите «FORMA · рабочее покрытие», вставьте UUID.
+   Доступны только E2E-сценарии магазина, без поднятия новой Docker-БД.
+3. Запустите тесты и дождитесь отчёта; QA **не завершает** основной прогон.
+4. В `/coverage/` нажмите «Обновить покрытие». Теперь там появятся
+   GraphQL-поля, которые прошли через рабочий proxy.
+5. Когда нужно, завершите прогон вручную в Coverage.
+
+Прогон использует **постоянную демо-БД**. Тесты создают и отменяют заказы,
+возвращая остатки по обычному сценарию; избегайте параллельных ручных
+действий в магазине. Если процесс будет аварийно завершён, понадобится
+проверить незавершённые тестовые заказы.
+
+Без настройки `/etc/graphql-qa-panel.env` переключатель FORMA в панели
+неактивен, а обычный изолированный QA продолжает работать.

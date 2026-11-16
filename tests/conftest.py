@@ -25,6 +25,7 @@ def pytest_addoption(parser):
     parser.addoption("--coverage-backend-dir", default=None)
     parser.addoption("--coverage-url", default=None)
     parser.addoption("--upstream-url", default=None)
+    parser.addoption("--deployed-run-id", default=None)
     parser.addoption("--live-base-url", default=None)
     parser.addoption("--selection-file", default=None)
     parser.addoption("--catalog-file", default=None)

@@ -147,6 +147,7 @@ def test_storefront_retry_after_lost_checkout_response(storefront):
     before = s.direct("{products{id stock}}")["products"]
     initial_stock = next(x["stock"] for x in before if x["id"] == "cable")
     previous = {x["id"] for x in s.direct("{orders{id}}")["orders"]}
+    baseline = s.run.snapshot("До повтора заказа") if getattr(s.run, "deployed", False) else None
     login(p)
     attempts = []
 
@@ -184,8 +185,10 @@ def test_storefront_retry_after_lost_checkout_response(storefront):
     s.api.expect("Товар списан один раз", remaining, initial_stock - 1)
     checkpoint = s.run.snapshot("Потерянный ответ и повторная покупка")
     operation = next(x for x in checkpoint["operations"] if x["operationName"] == "CreateOrder")
-    s.api.expect("Proxy сохранил оба обращения mutation", operation["requestCount"], 2)
-    s.api.expect("Покрытие отражает два вызова, а не число заказов", checkpoint["fieldHits"]["Mutation.createOrder"], 2)
+    prior_operation = next((x["requestCount"] for x in baseline["operations"] if x["operationName"] == "CreateOrder"), 0) if baseline else 0
+    prior_hits = baseline["fieldHits"]["Mutation.createOrder"] if baseline else 0
+    s.api.expect("Proxy сохранил оба обращения mutation", operation["requestCount"] - prior_operation, 2)
+    s.api.expect("Покрытие отражает два вызова, а не число заказов", checkpoint["fieldHits"]["Mutation.createOrder"] - prior_hits, 2)
 
 @pytest.mark.case("Магазин: временный отказ при восстановлении профиля сохраняет сессию")
 def test_storefront_session_survives_profile_outage(storefront):
