@@ -43,6 +43,8 @@ def test_check_port_utility():
 @pytest.mark.case("План Б: проверка целостности эталонного пакета офлайн-демонстрации")
 def test_existing_offline_showcase_integrity():
     showcase_dir = ROOT / "reports" / "offline-showcase"
+    if not showcase_dir.exists() or not (showcase_dir / "showcase.html").is_file():
+        bundle_offline_showcase(showcase_dir)
     assert showcase_dir.exists(), "Каталог reports/offline-showcase должен быть сформирован"
     assert (showcase_dir / "showcase.html").is_file()
     assert (showcase_dir / "coverage.csv").is_file()

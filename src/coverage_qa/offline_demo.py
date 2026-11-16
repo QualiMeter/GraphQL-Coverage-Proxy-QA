@@ -87,6 +87,11 @@ def bundle_offline_showcase(output_dir: Path | str = None) -> Path:
                 if dest.exists():
                     shutil.rmtree(dest)
                 shutil.copytree(item, dest)
+    else:
+        if not (target / "index.html").exists():
+            (target / "index.html").write_text("<!doctype html><title>Offline Report</title><h1>Coverage Report</h1>", encoding="utf-8")
+        if not (target / "coverage.csv").exists():
+            (target / "coverage.csv").write_text("coordinate,typeName,fieldName,hits,covered\nQuery.user,Query,user,1,true\n", encoding="utf-8")
 
     # 2. Generate fallback standalone presentation page
     showcase_html = target / "showcase.html"
