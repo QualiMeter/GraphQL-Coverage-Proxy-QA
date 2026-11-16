@@ -50,15 +50,8 @@ def update_history(folder, report):
                      "coverageRuns": report.get("coverageRuns", []), "backend": report.get("backend")})
     save_json(manifest_path, manifest)
     root = folder.parent.parent
-    rows = []
-    for path in sorted((root / "runs").glob("*/manifest.json"), reverse=True):
-        m = json.loads(path.read_text(encoding="utf-8"))
-        target = f"runs/{path.parent.name}/index.html"
-        rows.append(f'<tr><td><a href="{target}">{html.escape(m.get("localTime", m["id"]))}</a></td>'
-                    f'<td>{html.escape(m.get("label", ""))}</td><td>{html.escape(m.get("suite", ""))}</td>'
-                    f'<td>{html.escape(m["status"])}</td><td>{m.get("passed", 0)} / {m.get("failed", 0)} / {m.get("skipped", 0)}</td></tr>')
-    source = '<!doctype html><html lang="ru"><meta charset="utf-8"><title>История API-тестов</title><style>body{font:15px system-ui;max-width:1200px;margin:40px auto;padding:20px;background:#f3f5f8;color:#203048}table{width:100%;border-collapse:collapse;background:white}td,th{padding:14px;text-align:left;border-bottom:1px solid #ddd}a{color:#315bdb}</style><h1>История API-тестов</h1><p>Время — Екатеринбург (UTC+5). Результаты: пройдено / ошибок / пропущено.</p><table><tr><th>Запуск</th><th>Название</th><th>Набор</th><th>Статус</th><th>Результаты</th></tr>' + ''.join(rows) + '</table></html>'
-    (root / "index.html").write_text(source, encoding="utf-8")
+    from coverage_qa.reporting.cleanup import rebuild_history_index
+    rebuild_history_index(root)
     latest = root / "latest"
     latest.mkdir(exist_ok=True)
     # Preserve the pre-history implementation's report before replacing its entry page.

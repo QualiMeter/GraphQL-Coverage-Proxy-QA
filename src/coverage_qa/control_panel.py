@@ -287,8 +287,15 @@ def create_app(manager=None):
     @app.post("/api/catalog/refresh")
     def refresh_catalog():
         with manager.lock:
-            if manager.active and manager.snapshot(manager.active)["manifest"].get("status") == "starting":
-                raise HTTPException(409, "Дождитесь завершения текущего запуска")
+            if manager.active:
+                try:
+                    if manager.snapshot(manager.active)["manifest"].get("status") == "starting":
+                        raise HTTPException(409, "Дождитесь завершения текущего запуска")
+                except HTTPException as exc:
+                    if exc.status_code == 404:
+                        manager.active = None
+                    else:
+                        raise
             manager._catalog = None
             try:
                 return {"catalog": manager.catalog()}

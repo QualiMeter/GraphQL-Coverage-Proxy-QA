@@ -68,16 +68,31 @@ class API:
             raise EvidenceMismatch(title)
 
 
-INLINE_SECRET_RE = re.compile(
-    r'(?i)\b(password|token|accesstoken|refreshtoken|secret|apikey)\s*:\s*("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')'
+BEARER_TOKEN_RE = re.compile(
+    r'(?i)\bBearer\s+[A-Za-z0-9_\-\.=]+'
 )
+INLINE_SECRET_RE = re.compile(
+    r'(?i)(["\']?(?:password|token|accesstoken|refreshtoken|access_token|refresh_token|secret|apikey|api_key)["\']?\s*:\s*)(["\'](?:\\.|[^"\\])*["\']|\S+)'
+)
+
+SENSITIVE_KEYS = {
+    "password", "token", "accesstoken", "refreshtoken", "access_token",
+    "refresh_token", "secret", "apikey", "api_key", "authorization",
+    "cookie", "set-cookie", "x-coverage-api-key", "x-csrf-token",
+    "csrftoken", "csrf_token", "currentpassword", "current_password",
+    "newpassword", "new_password", "sessiontoken", "session_token"
+}
 
 
 def redact(value):
     if isinstance(value, str):
-        return INLINE_SECRET_RE.sub(r'\1: "<redacted>"', value)
+        v = BEARER_TOKEN_RE.sub("Bearer <redacted>", value)
+        return INLINE_SECRET_RE.sub(r'\g<1>"<redacted>"', v)
     if isinstance(value, dict):
-        return {k: "<redacted>" if k.lower() in {"password", "token", "accesstoken", "refreshtoken", "secret", "apikey", "api_key", "authorization", "cookie", "set-cookie", "x-coverage-api-key", "x-csrf-token", "csrftoken", "csrf_token"} else redact(v) for k, v in value.items()}
+        return {
+            k: "<redacted>" if k.lower() in SENSITIVE_KEYS else redact(v)
+            for k, v in value.items()
+        }
     if isinstance(value, (list, tuple)):
         return [redact(v) for v in value]
     return value

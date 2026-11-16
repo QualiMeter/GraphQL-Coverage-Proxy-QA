@@ -133,6 +133,41 @@ Linux/macOS: `export COVERAGE_BACKEND_DIR=/path/to/backend`.
 .\.venv\Scripts\coverage-qa test --label 'Проверка перед PR'
 ```
 
+**Комплексный preflight-контроль перед коммитом / PR (все репозитории):**
+
+Скрипт проверяет чистоту Git и отсутствие секретов, линтер ESLint, 179 Vitest-тестов и production-сборку фронтенда, unit-тесты бэкенда и платформенные проверки QA:
+
+```powershell
+# Комплексный аудит всех трёх репозиториев:
+.\.venv\Scripts\coverage-qa preflight
+
+# Ускоренный аудит (линтеры + unit-тесты фронта/бэка + build):
+.\.venv\Scripts\coverage-qa preflight --skip-tooling
+
+# Полный приёмочный прогон со всеми браузерными E2E-тестами:
+.\.venv\Scripts\coverage-qa preflight --full
+```
+
+**Аудит безопасности и маскирования секретов:**
+
+Сканирует репозитории и отчёты на наличие незамаскированных токенов, паролей, JWT и приватных ключей:
+
+```powershell
+.\.venv\Scripts\coverage-qa audit
+```
+
+**Очистка устаревших артефактов и прогонов:**
+
+Удаляет старые папки прогонов в `reports/runs/`, освобождает место на диске и пересобирает сводный `reports/index.html`:
+
+```powershell
+# Симуляция очистки (показывает сколько файлов и МБ будет удалено):
+.\.venv\Scripts\coverage-qa clean --dry-run --keep 10
+
+# Реальная очистка с сохранением последних 10 прогонов:
+.\.venv\Scripts\coverage-qa clean --keep 10
+```
+
 **Отдельные разделы и сценарии:**
 
 ```powershell

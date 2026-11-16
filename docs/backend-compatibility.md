@@ -75,6 +75,6 @@
 
 ## Границы
 
-Полный DNS-rebinding/SSRF/resource-limit аудит, concurrency races авторизации, last-admin и TLS/Nginx остаются в специализированном наборе backend. Frontend проверен отдельно через lint, Vitest и production-сборку. Сквозная проверка TST-07 остаётся открытой. Это дополнение к командным наборам, а не замена их тестов.
+Полный DNS-rebinding/SSRF/resource-limit аудит, concurrency races авторизации, last-admin и TLS/Nginx остаются в специализированном наборе backend. Frontend проверен отдельно через lint, Vitest и production-сборку. Сквозная браузерная проверка TST-07 автоматизирована в `tests/e2e/test_run_coverage_ui.py`. Это дополнение к командным наборам, а не замена их тестов.
 
 Source identity фиксируется в `results.json`, `manifest.json` и HTML: путь, commit, dirty-флаг. При ZIP без Git commit явно не определён. Для точного повторения используйте сохранённый backend commit и `requirements.lock.txt`.

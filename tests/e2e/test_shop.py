@@ -211,3 +211,137 @@ def test_storefront_session_survives_profile_outage(storefront):
     page.unroute("**/api/graphql", profile_outage)
     page.reload()
     expect(page.get_by_role("button", name="Войти", exact=True)).not_to_be_visible()
+
+
+@pytest.mark.case("Магазин: 504 Gateway Timeout каталога → статус «Нет связи с API» → повтор восстанавливает витрину")
+def test_storefront_catalog_504_gateway_timeout_and_recovery(storefront):
+    s, p = storefront, storefront.page
+
+    def fail_catalog(route):
+        if route.request.post_data_json.get("operationName") == "GetProducts":
+            route.fulfill(
+                status=504,
+                content_type="application/json",
+                body=json.dumps({"errors": [{"message": "GraphQL API timed out"}]}),
+            )
+        else:
+            route.continue_()
+
+    p.route("**/api/graphql", fail_catalog)
+    p.reload()
+
+    expect(p.locator("#catalog-error")).to_be_visible()
+    expect(p.locator(".product-card")).to_have_count(0)
+    expect(p.locator("#api-status")).to_have_class(re.compile(r"error"))
+    expect(p.locator("#api-status")).to_contain_text("Нет связи с API")
+    expect(p.locator("#retry-catalog")).to_be_visible()
+
+    # Проверка инспектора: ошибочный запрос с кодом 504 зафиксирован со статусом ошибки
+    p.locator("#inspector-button").click()
+    expect(p.locator("#inspector-dialog")).to_be_visible()
+    first_req = p.locator("#request-list .request-row").first
+    expect(first_req.locator(".request-state")).to_have_class(re.compile(r"error"))
+    expect(p.locator("#request-detail")).to_contain_text("504")
+    p.locator('[data-close="inspector-dialog"]').click()
+    expect(p.locator("#inspector-dialog")).not_to_be_visible()
+
+    # Восстановление сети и перезагрузка каталога по кнопке «Попробовать снова»
+    p.unroute("**/api/graphql", fail_catalog)
+    p.locator("#retry-catalog").click()
+
+    expect(p.locator("#catalog-error")).not_to_be_visible()
+    expect(p.locator(".product-card")).to_have_count(4)
+    expect(p.locator("#api-status")).to_have_class(re.compile(r"connected"))
+    expect(p.locator("#api-status")).to_contain_text("API на связи")
+    s.api.expect("Каталог успешно восстановлен после сбоя 504", p.locator(".product-card").count(), 4)
+
+
+@pytest.mark.case("Магазин: полный обрыв сети при покупке → корзина сохранена → восстановление сети и успешный заказ")
+def test_storefront_network_drop_preserves_cart_and_recovers(storefront):
+    s, p = storefront, storefront.page
+    login(p)
+
+    for prod_id in ("keyboard", "cable"):
+        p.get_by_test_id("product-" + prod_id).get_by_role("button", name="В корзину +", exact=True).click()
+
+    p.get_by_role("button", name="Открыть корзину", exact=True).click()
+    expect(p.locator("#cart-lines .cart-line")).to_have_count(2)
+    cart_total_before = cents(p.locator("#cart-total").inner_text())
+
+    def drop_network(route):
+        if route.request.post_data_json.get("operationName") == "CreateOrder":
+            route.abort("failed")
+        else:
+            route.continue_()
+
+    p.route("**/api/graphql", drop_network)
+    p.get_by_role("button", name="Оформить заказ", exact=True).click()
+
+    # Ошибка сети в интерфейсе
+    expect(p.locator("#checkout-error")).to_be_visible()
+    expect(p.locator("#checkout-error")).to_contain_text("Нет соединения с магазином")
+    expect(p.locator("#api-status")).to_have_class(re.compile(r"error"))
+    expect(p.locator("#api-status")).to_contain_text("Нет связи с API")
+    expect(p.get_by_role("button", name="Оформить заказ", exact=True)).to_be_enabled()
+
+    # Корзина не очистилась при сбое сети
+    expect(p.locator("#cart-lines .cart-line")).to_have_count(2)
+    s.api.expect("Сумма корзины осталась неизменной", cents(p.locator("#cart-total").inner_text()), cart_total_before)
+
+    # Восстановление сети: убираем сбой
+    p.unroute("**/api/graphql", drop_network)
+    p.get_by_role("button", name="Оформить заказ", exact=True).click()
+
+    expect(p.get_by_test_id("success-order-id")).to_be_visible()
+    order_id = p.get_by_test_id("success-order-id").inner_text()
+    s.remember_order({"data": {"createOrder": {"id": order_id}}})
+
+    saved = s.direct("query($id:ID!){order(id:$id){id status totalCents items{product{id}}}}", {"id": order_id})["order"]
+    s.api.expect("Заказ успешно сохранён в БД после восстановления сети", saved["id"], order_id)
+    s.api.expect("Сумма созданного заказа совпадает с корзиной", saved["totalCents"], cart_total_before)
+    expect(p.locator("#api-status")).to_have_class(re.compile(r"connected"))
+    expect(p.locator("#cart-count")).to_have_text("0")
+
+
+@pytest.mark.case("Магазин: каскад ошибок 502/504 при восстановлении профиля не сбрасывает авторизацию покупателя")
+def test_storefront_cascading_502_504_outages_preserve_auth_session(storefront):
+    s, p = storefront, storefront.page
+    login(p)
+    key = "forma-session-v1"
+    original_token = p.evaluate("(k) => sessionStorage.getItem(k)", key)
+    assert original_token
+
+    # 1. Сбой 502 Bad Gateway
+    def outage_502(route):
+        if route.request.post_data_json.get("operationName") == "GetMe":
+            route.fulfill(status=502, content_type="application/json", body=json.dumps({"errors": [{"message": "Bad Gateway"}]}))
+        else:
+            route.continue_()
+
+    p.route("**/api/graphql", outage_502)
+    p.reload()
+    expect(p.locator("#toast")).to_contain_text("502")
+    token_after_502 = p.evaluate("(k) => sessionStorage.getItem(k)", key)
+    s.api.expect("Сессионный токен не стёрт при 502", token_after_502, original_token)
+    p.unroute("**/api/graphql", outage_502)
+
+    # 2. Сбой 504 Gateway Timeout
+    def outage_504(route):
+        if route.request.post_data_json.get("operationName") == "GetMe":
+            route.fulfill(status=504, content_type="application/json", body=json.dumps({"errors": [{"message": "Gateway Timeout"}]}))
+        else:
+            route.continue_()
+
+    p.route("**/api/graphql", outage_504)
+    p.reload()
+    expect(p.locator("#toast")).to_contain_text("504")
+    token_after_504 = p.evaluate("(k) => sessionStorage.getItem(k)", key)
+    s.api.expect("Сессионный токен не стёрт при 504", token_after_504, original_token)
+    p.unroute("**/api/graphql", outage_504)
+
+    # 3. Полное восстановление работоспособности бэкенда
+    p.reload()
+    expect(p.get_by_role("button", name="Войти", exact=True)).not_to_be_visible()
+    expect(p.locator("#account-name")).to_contain_text("Alice")
+    expect(p.locator("#api-status")).to_have_class(re.compile(r"connected"))
+    s.api.expect("Пользователь остался полностью авторизован", p.locator("#account-name").inner_text(), "Alice")
