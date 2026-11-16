@@ -25,7 +25,7 @@
 | Система | Учётная запись | Права | Где получить пароль |
 | --- | --- | --- | --- |
 | Coverage Proxy | `demo_operator` | **operator**, с доступом (*service grant*) к FORMA Demo Shop | `Cringe_2285267` |
-| TestLab (`/qa/`) | `alexei` (Nginx Basic Auth) | Запуск сценариев и просмотр отчётов; роли Coverage здесь не действуют | `K2aG0u1a5_zxc` |
+| TestLab (`/qa/`) | `alexei` (Nginx Basic Auth) | Запуск сценариев и просмотр отчётов; роли Coverage здесь не действуют | `ZxC1000_7I` |
 
 ### Тестовые аккаунты магазина (публичные демоданные)
 
