@@ -33,7 +33,10 @@ services:
       context: .
       dockerfile: web/Dockerfile
     environment:
-      SHOP_GRAPHQL_URL: http://api:9100/graphql
+      SHOP_GRAPHQL_URL: ${SHOP_GRAPHQL_URL:-http://api:9100/graphql}
+      SHOP_COVERAGE_API_KEY: ${SHOP_COVERAGE_API_KEY:-}
+      SHOP_COVERAGE_RUN_ID: ${SHOP_COVERAGE_RUN_ID:-}
+      SHOP_QA_PANEL_URL: ${SHOP_QA_PANEL_URL:-http://localhost:9020/}
     ports:
       - "127.0.0.1:9110:9110"
     depends_on:
