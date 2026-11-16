@@ -53,6 +53,7 @@ def main():
     parser.add_argument("--local", action="store_true", help="Disposable infrastructure is the default")
     parser.add_argument("--coverage-url", help="Existing test proxy, configured for the controlled upstream")
     parser.add_argument("--upstream-url", help="Existing controlled upstream address")
+    parser.add_argument("--deployed-run-id", help="Existing active FORMA run UUID (server-side credentials)")
     parser.add_argument("--live-base-url", help="Explicitly enable GET-only deployment checks")
     parser.add_argument("--coverage-backend-dir", type=Path, default=TEAM_BACKEND)
     parser.add_argument("--report-dir", type=Path, default=ROOT / "reports")
@@ -68,6 +69,8 @@ def main():
         parser.error("--suite live requires --live-base-url")
     if args.coverage_url and not args.upstream_url:
         parser.error("--coverage-url requires --upstream-url")
+    if args.deployed_run_id and (args.suite != "e2e" or not args.coverage_url or not os.environ.get("COVERAGE_API_KEY")):
+        parser.error("--deployed-run-id requires --suite e2e, --coverage-url and COVERAGE_API_KEY")
     paths, extra = select_paths(extra, parser, args.suite, bool(args.live_base_url))
     if "--collect-only" in extra or "--co" in extra:
         return subprocess.call([sys.executable, "-m", "pytest", "-c", str(ROOT / "pyproject.toml"),
@@ -88,6 +91,8 @@ def main():
             command += [f"--selection-file={args.selection_file.resolve()}"]
         if args.coverage_url:
             command += [f"--coverage-url={args.coverage_url}", f"--upstream-url={args.upstream_url}"]
+            if args.deployed_run_id:
+                command += [f"--deployed-run-id={args.deployed_run_id}"]
         else:
             command += ["--managed-coverage"]
         command += [f"--coverage-backend-dir={args.coverage_backend_dir.resolve()}"]
