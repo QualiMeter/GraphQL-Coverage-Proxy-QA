@@ -1,173 +1,41 @@
-# Интеграция GraphQL Coverage Proxy с GitLab CI/CD
+# GitLab CI для QA
 
-Настоящий документ описывает архитектуру и практическое руководство по подключению **GraphQL Coverage Proxy** и платформы тестирования **TestLab** к корпоративным конвейерам **GitLab CI/CD**.
+Исходники QA, бэкенда и фронтенда могут оставаться на GitHub. Основная конфигурация QA находится в корне репозитория в `.gitlab-ci.yml`. Есть два способа подключить её к GitLab.
 
----
+## GitHub остаётся источником кода
 
-## Архитектурные модели
+1. Создайте в GitLab служебный проект. В его основную защищённую ветку положите файл [github-bridge.yml](../examples/gitlab/github-bridge.yml) под именем `.gitlab-ci.yml`. Это единственный файл, который надо перенести. Для запуска API разрешите владельцу токена создавать pipeline с переменными.
+2. Подключите к служебному проекту выделенный Linux GitLab Runner с executor **shell**, Bash и тегом **coverage-qa-linux**. Runner должен обслуживать только доверенный проект и защищённые ветки. На хосте нужны Git, Python 3.12 с venv, Node.js 22.12+ с npm, Docker Engine с Compose v2 и системные библиотеки Chromium. Установите библиотеки командой `python -m playwright install-deps chromium` из окружения с установленным Playwright. Пользователю runner нужен доступ к локальному Docker: тесты запускают PostgreSQL и подключаются через порт на 127.0.0.1. Для закрытых репозиториев настройте на runner read-only Git credential helper для github.com. Запись в командные репозитории не требуется.
+3. Защитите исходные ветки GitHub, указанные в [workflow](../.github/workflows/gitlab.yml). В GitHub → Settings → Secrets and variables → Actions создайте переменные **GITLAB_API_URL** (например, `https://gitlab.com/api/v4`), **GITLAB_PROJECT_ID** (числовой ID служебного проекта), **GITLAB_REF** (его защищённая ветка). В secrets положите **GITLAB_PROJECT_TOKEN** с правом API для создания и чтения pipeline в этом проекте. URL и ref задаёт администратор. Не помещайте токен в Git.
+4. После публикации QA выполните push в `feat/qa-platform-and-demo-shop` или `main`. Для повторного запуска откройте Actions → GitLab QA → Run workflow. GitHub передаст точный SHA в GitLab и покажет ссылку на pipeline в Summary. Пока переменная GITLAB_API_URL пуста, этот workflow пропускается.
+5. GitLab проверяет принадлежность SHA разрешённой ветке, извлекает CI-конфигурацию из этого же коммита и запускает дочерний pipeline. Каждый job проверяет SHA исходников перед исполнением. GitHub ждёт итог родительского pipeline и завершает проверку ошибкой при сбое. Для ручного старта в GitLab укажите `QA_GITHUB_SHA` полностью (40 символов). Артефакты тестов доступны в дочернем pipeline.
 
-В соответствии с требованиями корпоративной безопасности и спецификой инфраструктуры заказчика поддерживаются два режима интеграции:
+Если в GitLab уже настроено зеркало QA, запускайте корневой файл напрямую, без служебного проекта и переменной QA_GITHUB_SHA. Выберите один способ запуска, чтобы один push не создавал два pipeline. [Официальное подключение GitHub](https://docs.gitlab.com/ci/ci_cd_for_external_repos/github_integration/) · [Shell runner](https://docs.gitlab.com/runner/executors/shell/).
 
-```mermaid
-flowchart TD
-    subgraph Option_A["Вариант А: Режим наблюдения (Observer / In-Pipeline) — Рекомендуемый"]
-        GL_Runner["GitLab CI Runner (инфраструктура компании)"] -->|"1. Запуск тестов"| TestSuite["Pytest / E2E / Мобильные тесты"]
-        TestSuite -->|"2. HTTP/GraphQL через Proxy (X-Coverage-Run-Id)"| GCP["GraphQL Coverage Proxy"]
-        GCP -->|"3. Проксирование"| Upstream["GraphQL Upstream Backend"]
-        TestSuite -->|"4. Завершение тестов"| GL_Gate["Job: graphql-coverage-gate"]
-        GL_Gate -->|"5. GET /api/runs/{id}/coverage"| GCP
-        GL_Gate -->|"6. JUnit XML & Regex"| GL_UI["GitLab MR & Test Report"]
-    end
+## Что выполняется
 
-    subgraph Option_B["Вариант В: Удалённый запуск пайплайна (Remote Pipeline Trigger)"]
-        TestLab_UI["TestLab UI / CLI coverage-qa"] -->|"1. POST /api/v4/projects/:id/trigger/pipeline"| GitLab_API["GitLab API v4"]
-        GitLab_API -->|"2. Инициация пайплайна с переменными"| GL_Pipeline["GitLab CI Pipeline"]
-        TestLab_UI -->|"3. Polling GET /pipelines/:id"| GitLab_API
-        GL_Pipeline -->|"4. Трафик через Proxy"| GCP
-        TestLab_UI -->|"5. Авто-проверка Quality Gate"| GCP
-    end
+| Job | Действие и результат |
+| --- | --- |
+| frontend-build | Скачивает указанный FRONTEND_SHA, устанавливает зависимости из npm lockfile, запускает ESLint, Vitest и сборку. Передаёт dist в acceptance. |
+| acceptance | Скачивает BACKEND_SHA. Создаёт Python venv, устанавливает оба клиента Playwright и Chromium. Выполняет приёмку MVP с перезапуском бэка и весь локальный набор QA с PostgreSQL. TST-07 открывает переданную сборку, выбирает конкретный прогон и сверяет метрики и hits с REST. |
+| graphql-coverage-gate | Берёт coverage JSON из job acceptance этого pipeline. Файл содержит UUID реально выполненного MVP-прогона и счётчики после рестарта. Сохраняет JUnit, CSV и JSON, печатает процент для GitLab и возвращает код 1 при недоборе. |
+| external-run-gate | Дополнительно запускается на защищённой ветке при переданном COVERAGE_RUN_ID. Получает граф существующего прогона из API стенда. |
+
+QA использует временные базы и локальные upstream-сервисы. Для миграции пары компонентов измените полные **BACKEND_SHA** и **FRONTEND_SHA** в корневой конфигурации. Их значения попадают в лог checkout. Обычный запуск не требует паролей действующего стенда.
+
+**MVP_MIN_PERCENT** по умолчанию равен 66.67. Для зафиксированного сценария это 6 из 9 полей после округления до сотых. Чтобы проверить отрицательный исход, запустите pipeline с порогом 80: тесты выполнятся, gate станет красным, JUnit покажет причину. Это процент полей GraphQL данного прогона. JUnit всего набора и HTML-отчёты находятся в job acceptance. XML, CSV со счётчиками и JSON порога находятся в job gate.
+
+## Проверка внешнего прогона и запуск из TestLab
+
+Сначала создайте прогон в Coverage Proxy и направьте запросы приложения через прокси с заголовком `X-Coverage-Run-Id`, содержащим возвращённый API UUID. Настройте **COVERAGE_URL** в доверенных настройках проекта GitLab и при необходимости **COVERAGE_API_KEY** как masked/protected secret. По умолчанию порог внешнего прогона **COVERAGE_MIN_PERCENT** равен 80. Проект с копией QA или зеркалом можно запускать из TestLab либо через [trigger_pipeline.sh](../examples/gitlab/trigger_pipeline.sh). Для служебного проекта также требуется QA_GITHUB_SHA: вставьте его в поле SHA панели, передайте CLI через `-V QA_GITHUB_SHA=…` или задайте переменную для shell-скрипта.
+
+Для запуска достаточно pipeline trigger token. Чтение статуса требует отдельного права GitLab API: для CLI с `--wait` используйте project access token с нужными правами. Включите доверенный HTTPS-адрес GitLab. Передавайте ключи через защищённое окружение и удаляйте временные доступы после демонстрации.
+
+## Проверка вручную
+
+```sh
+python -m acceptance.mvp.run --export-graph reports/gate-input.json
+python -m coverage_qa gitlab gate --graph-file reports/gate-input.json --min-coverage 66.67 --junit-out reports/gate.xml --csv-out reports/fields.csv --summary-out reports/summary.json
 ```
 
----
-
-## Вариант А: Режим наблюдения (Observer Mode)
-
-### Принцип работы
-- Компания запускает тесты в своём GitLab CI.
-- Исходный код тестов, секреты и внутренняя инфраструктура остаются внутри контура заказчика.
-- Единственное требование: направить GraphQL-трафик через адрес Coverage Proxy с передачей идентификатора прогона.
-
-### Пример `.gitlab-ci.yml`
-```yaml
-stages:
-  - test
-  - quality-gate
-
-variables:
-  COVERAGE_URL: "http://coverage-proxy.internal:8000"
-  COVERAGE_MIN_PERCENT: "80.0"
-
-# Этап 1: Выполнение существующих автотестов через Coverage Proxy
-run-api-tests:
-  stage: test
-  image: python:3.12-slim
-  script:
-    - pip install -r requirements.txt
-    - |
-      # Запуск ваших тестов с проксированием GraphQL-запросов
-      pytest -v --junitxml=reports/tests.xml
-  artifacts:
-    when: always
-    reports:
-      junit: reports/tests.xml
-
-# Этап 2: Quality Gate по покрытию GraphQL-схемы
-graphql-coverage-gate:
-  stage: quality-gate
-  image: python:3.12-slim
-  before_script:
-    - pip install graphql-coverage-qa
-  script:
-    - |
-      RUN_ID="${COVERAGE_RUN_ID:-$CI_PIPELINE_IID}"
-      coverage-qa gitlab gate \
-        --coverage-url "$COVERAGE_URL" \
-        --api-key "$COVERAGE_API_KEY" \
-        --run-id "$RUN_ID" \
-        --min-coverage "$COVERAGE_MIN_PERCENT" \
-        --junit-out reports/coverage-junit.xml \
-        --csv-out reports/coverage-fields.csv \
-        --summary-out reports/coverage-summary.json
-  # Нативный сбор процента покрытия в GitLab CI:
-  coverage: '/Total coverage:\s*([0-9.]+)%/'
-  artifacts:
-    when: always
-    reports:
-      junit: reports/coverage-junit.xml
-    paths:
-      - reports/coverage-junit.xml
-      - reports/coverage-fields.csv
-      - reports/coverage-summary.json
-```
-
-### Как GitLab отображает результаты:
-1. **Бейджи и MR Widget**: благодаря строке `Total coverage: XX.XX%` и директиве `coverage: '/Total coverage:\s*([0-9.]+)%/'`, GitLab вычисляет и выводит точный процент покрытия прямо в интерфейсе Merge Request и бейджах репозитория.
-2. **Вкладка Test Summary в GitLab**: сгенерированный `reports/coverage-junit.xml` содержит проверки `test_field_coverage_threshold` и `test_schema_completeness`. Если покрытие ниже нормы, шаг падает с детальным перечнем непокрытых полей схемы прямо в интерфейсе GitLab.
-
----
-
-## Вариант В: Удалённый запуск пайплайна (Remote Pipeline Trigger)
-
-### Принцип работы
-- Инженер по тестированию нажимает кнопку в панели **TestLab** (вкладка `🦊 GitLab CI`) или выполняет CLI-команду.
-- Система формирует запрос к официальному GitLab API v4 (`/api/v4/projects/:id/trigger/pipeline` или `/api/v4/projects/:id/pipeline`).
-- Пайплайн запускается на раннерах компании с переданными переменными `COVERAGE_RUN_ID` и `COVERAGE_PROXY_URL`.
-- TestLab отслеживает выполнение (`pending` -> `running` -> `success`), выводит ссылку на пайплайн в GitLab и при успешном завершении автоматически опрашивает Coverage Proxy и отображает финальный процент покрытия.
-
-### Запуск через CLI
-```bash
-coverage-qa gitlab trigger \
-  --host https://gitlab.company.ru \
-  --project 12345 \
-  --token "$GITLAB_TRIGGER_TOKEN" \
-  --ref main \
-  --run-id "run-forma-ci-42" \
-  --coverage-url "http://coverage-proxy.internal:8000" \
-  --min-coverage 80.0 \
-  --wait
-```
-
-### Параметры CLI `coverage-qa gitlab trigger`
-- `--project`: Числовой ID проекта или URL-encoded путь (например, `org/repo`).
-- `--token`: Токен триггера (Pipeline Trigger Token) или Personal Access Token (`glpat-...`).
-- `--ref`: Ветка или тег (по умолчанию `main`).
-- `--host`: Базовый URL инстанса GitLab (по умолчанию `https://gitlab.com`).
-- `--run-id`: Идентификатор прогона в Coverage Proxy.
-- `--coverage-url`: URL сервиса покрытия.
-- `--wait`: Ожидать завершения пайплайна в реальном времени.
-- `--timeout`: Таймаут ожидания в секундах (по умолчанию 600с).
-- `--poll-interval`: Интервал опроса статуса (по умолчанию 5с).
-
----
-
-## Проверка Quality Gate вручную (CLI)
-
-```bash
-coverage-qa gitlab gate \
-  --coverage-url "http://localhost:8000" \
-  --api-key "$COVERAGE_API_KEY" \
-  --run-id "xxxx-xxxx-xxxx-xxxx" \
-  --min-coverage 80.0 \
-  --junit-out reports/junit.xml \
-  --csv-out reports/coverage.csv \
-  --summary-out reports/summary.json
-```
-
-Вывод команды:
-```text
-============================================================
-GraphQL Coverage Quality Gate: RUN 11111111-1111-1111-1111-111111111111
-Total coverage: 90.00%
-Covered fields: 9 / 10
-Threshold: 80.00%
-Status: PASSED
-Uncovered (1):
-  - Product.sku
-============================================================
-JUnit XML generated: reports/junit.xml
-CSV report generated: reports/coverage.csv
-Summary JSON generated: reports/summary.json
-```
-
-Код возврата:
-- `0` — Покрытие `>= min_coverage` (успех).
-- `1` — Покрытие `< min_coverage` или ошибка выполнения.
-
----
-
-## Генерация шаблона `.gitlab-ci.yml`
-
-Вы можете в любой момент сгенерировать готовый шаблон конфигурации командой:
-```bash
-coverage-qa gitlab template --out .gitlab-ci.yml
-```
+Для воспроизведения TST-07 задайте `QA_FRONTEND_DIST` абсолютным путём к собранной папке dist и выполните `python -m coverage_qa test -- tests/e2e/test_run_coverage_ui.py`. Если сборка по указанному пути отсутствует, тест завершится ошибкой.

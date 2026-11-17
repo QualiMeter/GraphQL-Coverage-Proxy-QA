@@ -3,6 +3,7 @@ import html
 import io
 import json
 from pathlib import Path
+from coverage_qa.reporting.metrics import graph_field_hits
 
 
 def escape(value):
@@ -19,8 +20,7 @@ def final_measurement(run):
     graph = snapshot.get("graph") or {}
     percent = graph.get("summary", snapshot.get("summary", {})).get("coveragePercent")
     if "types" in graph:
-        hits = {f"{t['name']}.{f['name']}": f["hits"]
-                for t in graph["types"] for f in t["fields"]}
+        hits = graph_field_hits(graph)
     else:
         hits = snapshot.get("fieldHits", snapshot.get("finalFieldHits"))
     return hits, percent

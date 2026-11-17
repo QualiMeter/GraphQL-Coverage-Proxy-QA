@@ -26,3 +26,6 @@ testpaths = ["tests"]
 pythonpath = [".", "src"]
 markers = ["case(title): scenario title", "coverage: Coverage Proxy integration", "browser: Playwright E2E"]
 filterwarnings = ["ignore::DeprecationWarning:starlette.testclient", "ignore::DeprecationWarning:httpx"]
+
+[tool.setuptools.data-files]
+"share/graphql-coverage-qa" = [".gitlab-ci.yml"]

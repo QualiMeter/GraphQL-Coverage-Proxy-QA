@@ -273,6 +273,7 @@ def test_cli_gitlab_template(tmp_path, capsys):
     text = out_file.read_text(encoding="utf-8")
     assert "quality-gate" in text
     assert "gitlab gate" in text
+    assert text == (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
 
 
 @pytest.mark.case("CLI: coverage-qa gitlab gate возвращает 0 при успехе и 1 при падении")
@@ -372,3 +373,48 @@ def test_panel_gitlab_gate_api(panel_client, sample_coverage_graph_pass):
     assert data["passed"] is True
     assert data["coverage_percent"] == 90.0
     assert data["covered_fields"] == 9
+
+def test_pipeline_artifact_gate(tmp_path, sample_coverage_graph_pass):
+    graph = sample_coverage_graph_pass
+    graph["runId"] = graph.pop("run_id")
+    graph["schemaId"] = graph.pop("schema_id")
+    graph["summary"] = {"totalFields": 10, "coveredFields": 9}
+    artifact = tmp_path / "graph.json"
+    artifact.write_text(json.dumps(graph), encoding="utf-8")
+    summary = tmp_path / "summary.json"
+    args = ["gate", "--graph-file", str(artifact), "--summary-out", str(summary)]
+    with patch.object(CoverageQualityGate, "fetch_coverage", side_effect=AssertionError):
+        assert gitlab_main([*args, "--min-coverage", "90"]) == 0
+        actual = json.loads(summary.read_text(encoding="utf-8"))
+        assert actual["run_id"] == graph["runId"]
+        assert actual["schema_id"] == graph["schemaId"]
+        assert gitlab_main([*args, "--min-coverage", "91"]) == 1
+        graph["summary"]["coveredFields"] = 10
+        artifact.write_text(json.dumps(graph), encoding="utf-8")
+        assert gitlab_main(args) == 1
+
+
+def test_panel_status_requires_header(panel_client):
+    client, _ = panel_client
+    path = "/api/gitlab/pipelines/123/456"
+    assert client.get(path).status_code == 401
+    with patch.object(GitLabClient, "get_pipeline", return_value={"status": "success"}) as get:
+        assert client.get(path, headers={"X-GitLab-Token": "test-token"}).json()["status"] == "success"
+    get.assert_called_once_with(project_id="123", pipeline_id=456, token="test-token")
+
+def test_panel_uses_server_key_only_for_configured_proxy(panel_client, monkeypatch, sample_coverage_graph_pass):
+    client, manager = panel_client
+    monkeypatch.setenv("COVERAGE_URL", "https://team.example.test")
+    monkeypatch.setenv("COVERAGE_API_KEY", "test-server-key")
+    observed = []
+
+    def fetch(gate, run_id):
+        observed.append((gate.coverage_url, gate.api_key))
+        return sample_coverage_graph_pass
+
+    with patch.object(CoverageQualityGate, "fetch_coverage", fetch):
+        for url in ("https://team.example.test", "https://other.example.test"):
+            response = client.post("/api/gitlab/gate", headers={"X-Panel-Token": manager.token},
+                                   json={"run_id": sample_coverage_graph_pass["run_id"], "coverage_url": url})
+            assert response.status_code == 200
+    assert observed == [("https://team.example.test", "test-server-key"), ("https://other.example.test", "")]

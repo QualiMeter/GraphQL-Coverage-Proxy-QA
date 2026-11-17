@@ -261,38 +261,11 @@ Linux/macOS: `export COVERAGE_BACKEND_DIR=/path/to/backend`.
 python -m coverage_qa.reporting.diff reports/mvp/<before>/coverage.json reports/mvp/<after>/coverage.json
 ```
 
-Подставьте идентификаторы каталогов. Команда печатает Markdown. Для CSV в Python передайте результат `compare_runs(before, after)` функции `format_diff_csv` из того же модуля. Для целого `results.json` модуль берёт максимум hits по каждой координате среди прогонов. Знаменатель сравнения — объединение координат обоих входов. Для сравнения разных сервисов выбирайте конкретные снимки и учитывайте различия схем.
+Подставьте идентификаторы каталогов. Команда печатает Markdown. Для CSV в Python передайте результат `compare_runs(before, after)` функции `format_diff_csv` из того же модуля. Для целого `results.json` модуль берёт максимум hits по каждой координате среди прогонов. Процент каждого прогона считается по его собственному набору полей OBJECT. Сравнение дополнительно возвращает addedFields и removedFields. Для старых плоских выгрузок без kind используются все сохранённые координаты. Для сравнения разных сервисов выбирайте конкретные снимки и учитывайте различия схем.
 
 ## Интеграция с GitLab CI
 
-Платформа поддерживает две корпоративные модели интеграции с GitLab CI/CD:
-
-1. **Вариант А: Режим наблюдения (Observer / In-Pipeline) — Рекомендуемый**
-   - Ваши автотесты выполняются на раннерах GitLab CI в инфраструктуре компании.
-   - GraphQL-запросы направляются через адрес Coverage Proxy.
-   - На шаге `quality-gate` проверяется соблюдение порога покрытия полей схемы:
-     ```bash
-     coverage-qa gitlab gate --run-id "$COVERAGE_RUN_ID" --min-coverage 80.0 --junit-out reports/junit.xml
-     ```
-   - GitLab автоматически считывает процент покрытия для бейджей и Merge Request по регулярному выражению:
-     ```yaml
-     coverage: '/Total coverage:\s*([0-9.]+)%/'
-     ```
-   - Формируется `junit.xml` для наглядного отображения непокрытых полей во вкладке **Tests** в GitLab.
-
-2. **Вариант В: Удалённый запуск пайплайна (Remote Pipeline Trigger)**
-   - Запуск существующего пайплайна компании прямо из интерфейса **TestLab** (вкладка `🦊 GitLab CI`) или из консоли:
-     ```bash
-     coverage-qa gitlab trigger --host https://gitlab.company.ru --project 12345 --token "$GITLAB_TRIGGER_TOKEN" --ref main --wait
-     ```
-   - TestLab отслеживает статус пайплайна в реальном времени (`pending` -> `running` -> `success`), даёт ссылку на пайплайн в GitLab и автоматически загружает результаты покрытия GraphQL-схемы.
-
-**Генерация шаблона `.gitlab-ci.yml`:**
-```bash
-coverage-qa gitlab template --out .gitlab-ci.yml
-```
-
-Полная документация и примеры: [docs/gitlab-ci.md](docs/gitlab-ci.md) и [examples/gitlab/](examples/gitlab/).
+GitHub может оставаться основным репозиторием. Workflow GitLab QA отправляет SHA коммита в служебный проект GitLab и ждёт результат. GitLab собирает фронтенд, запускает QA и MVP на временном PostgreSQL, затем проверяет покрытие конкретного прогона. JUnit, CSV, JSON и HTML доступны в артефактах заданий. Для подключения нужны GitLab-проект, runner и переменные GitHub Actions. [Подключение и проверка](docs/gitlab-ci.md).
 
 ## Магазин FORMA
 

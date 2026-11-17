@@ -41,6 +41,7 @@ class CoverageRun:
                         {"snapshotId": self.snapshot_id, "name": (name + ": " + test_id)[-200:],
                          "metadata": {"testRunId": self.report["id"], "pytestNodeId": node_id}}, expected=201)
         self.run_id = run["id"]
+        self.run_name = run["name"]
         self.finished = False
         self.seen_requests = set()
         self.record = {"testId": node_id, "serviceId": self.service_id, "snapshotId": self.snapshot_id,

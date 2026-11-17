@@ -63,120 +63,105 @@ def check_connectivity() -> dict:
     }
 
 
-def bundle_offline_showcase(output_dir: Path | str = None) -> Path:
+def bundle_offline_showcase(output_dir: Path | str = None, *, source_dir: Path | str = None) -> Path:
+    from coverage_qa.reporting.metrics import graph_field_hits
+
     target = Path(output_dir).resolve() if output_dir else ROOT / "reports" / "offline-showcase"
-    target.mkdir(parents=True, exist_ok=True)
-
-    # 1. Look for golden MVP report or latest run
-    mvp_runs = sorted((ROOT / "reports" / "mvp").glob("*/index.html"), reverse=True)
-    normal_runs = sorted((ROOT / "reports" / "runs").glob("*/index.html"), reverse=True)
-
-    source_dir = None
-    if mvp_runs:
-        source_dir = mvp_runs[0].parent
-    elif normal_runs:
-        source_dir = normal_runs[0].parent
-
-    if source_dir:
-        # Copy source files
-        for item in source_dir.iterdir():
-            dest = target / item.name
-            if item.is_file():
-                shutil.copy2(item, dest)
-            elif item.is_dir() and item.name in {"html", "results", "assets"}:
-                if dest.exists():
-                    shutil.rmtree(dest)
-                shutil.copytree(item, dest)
+    if source_dir is None:
+        candidates = [
+            path for pattern in ("mvp/*/coverage.json", "runs/*/results.json")
+            for path in (ROOT / "reports").glob(pattern)
+            if (path.parent / "index.html").is_file()
+        ]
+        source = max(candidates, key=lambda path: path.stat().st_mtime).parent if candidates else None
     else:
-        if not (target / "index.html").exists():
-            (target / "index.html").write_text("<!doctype html><title>Offline Report</title><h1>Coverage Report</h1>", encoding="utf-8")
-        if not (target / "coverage.csv").exists():
-            (target / "coverage.csv").write_text("coordinate,typeName,fieldName,hits,covered\nQuery.user,Query,user,1,true\n", encoding="utf-8")
+        source = Path(source_dir).resolve()
+    if source and (target == source or target.is_relative_to(source) or source.is_relative_to(target)):
+        raise ValueError("Source report and bundle directory must be separate")
 
-    # 2. Generate fallback standalone presentation page
-    showcase_html = target / "showcase.html"
-    source = """<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <title>GraphQL Coverage Proxy · Офлайн-стенд (План Б)</title>
-  <style>
-    :root { --primary: #1a73e8; --bg: #f8f9fa; --card: #ffffff; --text: #202124; --text-sec: #5f6368; --border: #dadce0; --green: #1e8e3e; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 40px 20px; line-height: 1.5; }
-    .container { max-width: 1100px; margin: 0 auto; }
-    .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 13px; font-weight: 600; background: #e6f4ea; color: var(--green); margin-bottom: 12px; }
-    h1 { margin: 0 0 8px 0; font-size: 28px; }
-    p.lead { color: var(--text-sec); margin: 0 0 32px 0; font-size: 16px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 32px; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .card h2 { font-size: 18px; margin: 0 0 12px 0; display: flex; align-items: center; justify-content: space-between; }
-    .card p { color: var(--text-sec); font-size: 14px; margin: 0 0 16px 0; }
-    .btn { display: inline-block; text-decoration: none; background: var(--primary); color: white; padding: 10px 18px; border-radius: 6px; font-weight: 500; font-size: 14px; transition: background 0.15s; }
-    .btn:hover { background: #1557b0; }
-    .btn.outline { background: transparent; color: var(--primary); border: 1px solid var(--border); margin-left: 8px; }
-    .btn.outline:hover { background: #f1f3f4; }
-    .metric-row { display: flex; gap: 24px; margin: 24px 0; background: white; border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
-    .metric { flex: 1; }
-    .metric-val { font-size: 32px; font-weight: 700; color: var(--primary); }
-    .metric-lbl { font-size: 13px; color: var(--text-sec); text-transform: uppercase; letter-spacing: 0.5px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px; }
-    th, td { padding: 10px 14px; border-bottom: 1px solid var(--border); text-align: left; }
-    th { background: #f1f3f4; font-weight: 600; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <span class="badge">● АВТОНОМНЫЙ ПАКЕТ ДЕМОНСТРАЦИИ</span>
-    <h1>GraphQL Coverage Proxy — План Б (Офлайн-стенд)</h1>
-    <p class="lead">Полная копия демонстрационных материалов и эталонных отчётов на случай сбоя внешнего канала связи или Wi-Fi на защите.</p>
+    data = {}
+    if source:
+        source_file = next((source / name for name in ("results.json", "coverage.json")
+                            if (source / name).is_file()), None)
+        if source_file is None or not (source / "index.html").is_file():
+            raise ValueError("Source must contain index.html and results.json or coverage.json")
+        data = json.loads(source_file.read_text(encoding="utf-8"))
 
-    <div class="metric-row">
-      <div class="metric"><div class="metric-val">88.57%</div><div class="metric-lbl">Покрытие схемы FORMA</div></div>
-      <div class="metric"><div class="metric-val">31 / 35</div><div class="metric-lbl">Покрытых полей GraphQL</div></div>
-      <div class="metric"><div class="metric-val">10 / 10</div><div class="metric-lbl">E2E-сценариев магазина</div></div>
-      <div class="metric"><div class="metric-val">100%</div><div class="metric-lbl">Изоляция без интернета</div></div>
-    </div>
+    target.mkdir(parents=True, exist_ok=True)
+    if source:
+        destination = target / "report"
+        if destination.is_symlink():
+            raise ValueError("Report destination must not be a symbolic link")
+        if destination.exists():
+            resolved = destination.resolve()
+            if resolved.parent != target or resolved.name != "report":
+                raise ValueError("Invalid report destination")
+            shutil.rmtree(resolved)
+        shutil.copytree(source, destination, ignore=shutil.ignore_patterns("*.log", "*.zip"),
+                        symlinks=False)
 
-    <div class="grid">
-      <div class="card">
-        <h2>Эталонный отчёт приёмки</h2>
-        <p>Интерактивный HTML-отчёт с визуализацией каждого шага, фактическими GraphQL-запросами, проверками и снимками состояния.</p>
-        <a class="btn" href="index.html">Открыть отчёт</a>
-        <a class="btn outline" href="coverage.csv" download>Скачать CSV</a>
-      </div>
+        copied_index = destination / "index.html"
+        copied_index.write_text(copied_index.read_text(encoding="utf-8").replace(
+            'href="../../index.html"', 'href="../showcase.html"'), encoding="utf-8")
 
-      <div class="card">
-        <h2>Магазин FORMA (Локально)</h2>
-        <p>Автономный запуск онлайн-витрины без удалённого VPS. Каталог, корзина, оформление заказов и GraphQL-инспектор.</p>
-        <a class="btn" href="http://127.0.0.1:9110/" target="_blank">Открыть витрину (:9110)</a>
-      </div>
+    graphs = []
+    if "types" in data:
+        graphs.append(data)
+    for run in data.get("coverageRuns", []):
+        checkpoints = run.get("checkpoints") or []
+        graph = checkpoints[-1].get("graph") if checkpoints else run.get("graph")
+        if graph and "types" in graph:
+            graphs.append(graph)
 
-      <div class="card">
-        <h2>Панель TestLab (Локально)</h2>
-        <p>Локальный пульт управления автотестами с живой телеметрией, ручным запуском сценариев и отображением покрытия.</p>
-        <a class="btn" href="http://127.0.0.1:9020/" target="_blank">Открыть TestLab (:9020)</a>
-      </div>
-    </div>
+    rows = []
+    metrics = []
+    for graph in graphs:
+        hits = graph_field_hits(graph)
+        total = len(hits)
+        covered = sum(count > 0 for count in hits.values())
+        percent = round(covered * 100 / total, 2) if total else 0.0
+        item = {"runId": graph.get("runId"), "schemaId": graph.get("schemaId"),
+                "coveredFields": covered, "totalFields": total, "coveragePercent": percent}
+        metrics.append(item)
+        rows.append(f"<tr><td>{html.escape(str(item['runId'] or '—'))}</td>"
+                    f"<td>{html.escape(str(item['schemaId'] or '—'))}</td>"
+                    f"<td>{covered} / {total}</td><td>{percent:.2f}%</td></tr>")
 
-    <div class="card">
-      <h2>Сценарии устойчивости витрины FORMA</h2>
-      <table>
-        <thead><tr><th>Сценарий</th><th>Описание</th><th>Результат</th></tr></thead>
-        <tbody>
-          <tr><td><strong>TST-07 React Coverage UI</strong></td><td>Сверка графа и таблицы покрытия в React с API прогона</td><td><span style="color:var(--green)">✓ Подтверждено</span></td></tr>
-          <tr><td><strong>Каталог & Корзина</strong></td><td>Пагинация, фильтры, отсутствие преждевременного списания</td><td><span style="color:var(--green)">✓ Подтверждено</span></td></tr>
-          <tr><td><strong>Покупка & Отмена</strong></td><td>Транзакционное сохранение заказа в PostgreSQL и возврат остатка</td><td><span style="color:var(--green)">✓ Подтверждено</span></td></tr>
-          <tr><td><strong>Сетевой обрыв (Drop)</strong></td><td>Сохранение корзины и idempotencyKey при сбое сети</td><td><span style="color:var(--green)">✓ Подтверждено</span></td></tr>
-          <tr><td><strong>Ошибки 502 / 504</strong></td><td>Индикатор «Нет связи с API» и сохранение сессии покупателя</td><td><span style="color:var(--green)">✓ Подтверждено</span></td></tr>
-          <tr><td><strong>Маскирование секретов</strong></td><td>Скрытие паролей и токенов (&lt;скрыто&gt;) в API-инспекторе</td><td><span style="color:var(--green)">✓ Подтверждено</span></td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</body>
-</html>
-"""
-    showcase_html.write_text(source, encoding="utf-8")
+    tests = data.get("tests", [])
+    test_rows = "".join(
+        f"<tr><td>{html.escape(str(test.get('title', test.get('id', '—'))))}</td>"
+        f"<td>{html.escape(str(test.get('status', 'unknown')))}</td></tr>" for test in tests
+    )
+    passed = sum(test.get("status") == "passed" for test in tests)
+    result = f"Сценариев пройдено {passed} / {len(tests)}." if tests else "Сведения о сценариях отсутствуют."
+    links = []
+    if source:
+        for filename, label in (("index.html", "Отчёт"), ("coverage.csv", "Coverage CSV"),
+                                ("test-matrix.csv", "Матрица тестов")):
+            if (target / "report" / filename).is_file():
+                links.append(f'<a href="report/{filename}">{label}</a>')
+    identity = source.name if source else None
+    manifest = {"sourceId": identity, "startedAt": data.get("startedAt"),
+                "finishedAt": data.get("finishedAt"), "backend": data.get("backend"),
+                "coverageRuns": metrics, "tests": tests, "exitCode": data.get("exitCode")}
+    (target / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
+                                        encoding="utf-8")
+    state = f"Источник {html.escape(identity)}" if identity else "Нет сохранённого прогона"
+    timing = html.escape(str(data.get("finishedAt") or data.get("startedAt") or "Время в источнике не указано"))
+    source_html = f"""<!doctype html>
+<html lang="ru"><meta charset="utf-8"><title>GraphQL Coverage Proxy — План Б</title>
+<style>body{{font:16px system-ui;max-width:1100px;margin:40px auto;padding:24px;color:#203048}}
+table{{width:100%;border-collapse:collapse;margin:24px 0}}td,th{{text-align:left;padding:12px;border-bottom:1px solid #ccc}}
+a{{display:inline-block;margin-right:24px}}code{{overflow-wrap:anywhere}}</style>
+<h1>GraphQL Coverage Proxy — План Б</h1><p>{state}</p><p>{timing}</p>
+<p>{' '.join(links)}</p><h2>Покрытие сохранённых прогонов</h2>
+<table><thead><tr><th>Прогон</th><th>Схема</th><th>Покрыто полей</th><th>Покрытие</th></tr></thead>
+<tbody>{''.join(rows)}</tbody></table>
+<p>{'Метрики покрытия в источнике отсутствуют.' if not rows else ''}</p>
+<h2>Результаты сценариев</h2><p>{result}</p>
+<table><thead><tr><th>Сценарий</th><th>Статус</th></tr></thead><tbody>{test_rows}</tbody></table>
+</html>"""
+    (target / "showcase.html").write_text(source_html, encoding="utf-8")
     return target
 
 
@@ -214,6 +199,8 @@ def main():
                         help="Action to perform: check (default), bundle, or serve")
     parser.add_argument("--port", type=int, default=9030, help="Port for serve action (default: 9030)")
 
+    parser.add_argument("--source", type=Path, help="Directory of a saved run")
+    parser.add_argument("--output", type=Path, help="Output bundle directory")
     args = parser.parse_args()
 
     if args.action == "check":
@@ -222,12 +209,12 @@ def main():
         return 0 if status["vps_alive"] else 1
 
     elif args.action == "bundle":
-        out = bundle_offline_showcase()
+        out = bundle_offline_showcase(args.output, source_dir=args.source)
         print(f"✓ Offline showcase bundled successfully at:\n  {out / 'showcase.html'}")
         return 0
 
     elif args.action == "serve":
-        bundle_dir = bundle_offline_showcase()
+        bundle_dir = bundle_offline_showcase(args.output, source_dir=args.source)
         from http.server import HTTPServer, SimpleHTTPRequestHandler
         os.chdir(bundle_dir)
         server = HTTPServer(("127.0.0.1", args.port), SimpleHTTPRequestHandler)

@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import subprocess
@@ -11,6 +12,9 @@ from coverage_qa.environment import CoverageStack, ROOT
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--export-graph", type=Path)
+    args = parser.parse_args()
     folder = ROOT / "reports" / "mvp" / uuid4().hex
     folder.mkdir(parents=True)
     print(f"MVP report: {folder}", flush=True)
@@ -30,6 +34,9 @@ def main():
             if response.json() != saved:
                 raise AssertionError("Coverage changed after backend restart")
         write_summary(folder, saved)
+        if args.export_graph:
+            args.export_graph.parent.mkdir(parents=True, exist_ok=True)
+            args.export_graph.write_text(json.dumps(saved), encoding="utf-8")
         print("PostgreSQL: coverage and all field hits survived backend restart.")
     finally:
         errors = stack.close()

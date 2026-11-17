@@ -16,6 +16,12 @@ pytestmark = [pytest.mark.coverage, pytest.mark.browser]
 
 
 def find_frontend_dist():
+    configured = os.environ.get("QA_FRONTEND_DIST")
+    if configured:
+        path = Path(configured).resolve()
+        if not (path / "index.html").is_file():
+            raise FileNotFoundError(path / "index.html")
+        return path
     candidates = [
         ROOT.parent / "GraphQL-Coverage-Proxy-Frontend" / "dist",
         ROOT.parent / "frontend" / "dist",
@@ -134,6 +140,8 @@ def test_tst07_run_coverage_in_react(coverage_run, request):
                 browser = playwright.chromium.launch(headless=True, **({"channel": channel} if channel else {}))
             except Exception as exc:
                 if "Executable doesn't exist" in str(exc):
+                    if os.environ.get("QA_FRONTEND_DIST"):
+                        raise
                     pytest.skip("Браузер Playwright не установлен. Запустите: python -m playwright install chromium")
                 raise
 
@@ -147,48 +155,27 @@ def test_tst07_run_coverage_in_react(coverage_run, request):
             # Выбрать созданный сервис в выпадающем меню
             service_button = page.locator("button.context-trigger", has_text="Сервис")
             service_button.click()
-            page.wait_for_selector(".context-menu", timeout=5000)
+            page.get_by_role("dialog", name="Сервис").get_by_role(
+                "button", name=re.compile(r"^TST-07 Service")
+            ).click()
+            page.locator("button.workspace-run").click()
+            with page.expect_response(lambda response: response.url.endswith(
+                f"/api/runs/{run.run_id}/coverage") and response.status == 200):
+                page.get_by_role("table", name="История прогонов сервиса").get_by_role(
+                    "button", name=run.run_name, exact=True
+                ).click()
 
-            # Ожидаем появление в меню не только mock-сервиса
-            page.wait_for_selector('.context-menu button[role="option"]:has-text("TST-07 Service")', timeout=10000)
-            service_row = page.locator('.context-menu button[role="option"]', has_text="TST-07 Service")
-            service_row.first.click()
-            page.wait_for_timeout(300)
-
-            # Перейти в раздел «История»
-            page.locator("button", has_text="История").click()
-            page.wait_for_selector(".run-history-table", timeout=8000)
-
-            # Найти строку нашего прогона и нажать выбор
-            run_btn = page.locator(".run-history-select").filter(has_text=run.run_id[:8])
-            if not run_btn.count():
-                run_btn = page.locator(".run-history-select").first
-            run_name = run_btn.inner_text().strip()
-            run_btn.click()
-
-            # Дождаться перехода на страницу схемы и отрисовки графа
-            page.wait_for_selector(".type-node", timeout=10000)
-
-            # Проверка 1: Сводка покрытия в TopChrome соответствует REST API
-            expected_pct = f"{summary['coveragePercent']:.2f}%"
-            expected_covered = str(summary["coveredFields"])
-            expected_total = str(summary["totalFields"])
-            expected_uncovered = str(summary["totalFields"] - summary["coveredFields"])
-
-            expect(page.locator(".summary-coverage .coverage-overview strong")).to_have_text(expected_pct)
-            expect(page.locator('.summary-coverage button[aria-label^="Покрыто:"] strong')).to_have_text(expected_covered)
-            expect(page.locator(".summary-coverage .static-metric strong")).to_have_text(expected_total)
-            expect(page.locator('.summary-coverage button[aria-label^="Не покрыто:"] strong')).to_have_text(expected_uncovered)
-
-            run.api.expect("React TopChrome: Процент общего покрытия совпадает с REST",
-                           page.locator(".summary-coverage .coverage-overview strong").inner_text().strip(),
-                           expected_pct)
-            run.api.expect("React TopChrome: Число покрытых полей совпадает с REST",
-                           page.locator('.summary-coverage button[aria-label^="Покрыто:"] strong').inner_text().strip(),
-                           expected_covered)
-            run.api.expect("React TopChrome: Общее число полей схемы совпадает с REST",
-                           page.locator(".summary-coverage .static-metric strong").inner_text().strip(),
-                           expected_total)
+            expected_metrics = {
+                "Общее покрытие": f"{summary['coveragePercent']:.2f}%".replace(".", ","),
+                "Покрыто": str(summary["coveredFields"]),
+                "Всего полей": str(summary["totalFields"]),
+                "Не покрыто": str(summary["totalFields"] - summary["coveredFields"]),
+            }
+            for label, expected in expected_metrics.items():
+                metric = page.locator(".coverage-strip .summary-metric").filter(
+                    has=page.get_by_text(label, exact=True)
+                ).locator("strong")
+                expect(metric).to_have_text(expected)
 
             # Проверка 2: Узлы графа ReactFlow показывают точный процент и статус полей
             for t in cov_api["types"]:

@@ -23,11 +23,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import quote_plus
+from uuid import UUID
 from xml.sax.saxutils import escape
 
 import httpx
 
 from coverage_qa.environment import ROOT
+from coverage_qa.reporting.metrics import graph_field_hits
 
 DEFAULT_GITLAB_HOST = "https://gitlab.com"
 GITLAB_COVERAGE_REGEX = r"Total coverage:\s*([0-9.]+)%"
@@ -174,12 +176,13 @@ class CoverageQualityGate:
         timeout: float = 15.0,
     ) -> None:
         self.coverage_url = (coverage_url or "http://localhost:8000").rstrip("/")
-        self.api_key = api_key or os.environ.get("COVERAGE_API_KEY", "")
+        self.api_key = os.environ.get("COVERAGE_API_KEY", "") if api_key is None else api_key
         self.timeout = timeout
 
     def fetch_coverage(self, run_id: str) -> dict[str, Any]:
         """Fetch raw coverage graph from Coverage Proxy."""
-        url = f"{self.coverage_url}/api/runs/{run_id}/coverage"
+        expected_id = str(UUID(run_id))
+        url = f"{self.coverage_url}/api/runs/{expected_id}/coverage"
         headers = {}
         if self.api_key:
             headers["X-Coverage-Api-Key"] = self.api_key
@@ -187,33 +190,31 @@ class CoverageQualityGate:
         with httpx.Client(timeout=self.timeout, trust_env=False) as client:
             resp = client.get(url, headers=headers)
             resp.raise_for_status()
-            return resp.json()
+            graph = resp.json()
+            if graph.get("runId", graph.get("run_id")) != expected_id:
+                raise ValueError("Coverage response belongs to another run")
+            return graph
 
     def evaluate(self, run_id: str, min_coverage: float = 80.0) -> GateEvaluation:
         """Evaluate coverage graph against min_coverage threshold."""
         data = self.fetch_coverage(run_id)
 
-        types = data.get("types", [])
-        field_hits: dict[str, int] = {}
-        covered_fields: list[str] = []
-        uncovered_fields: list[str] = []
+        return self.evaluate_graph(data, run_id, min_coverage)
 
-        for t in types:
-            t_name = t.get("name", "")
-            for f in t.get("fields", []):
-                f_name = f.get("name", "")
-                hits = int(f.get("hits", 0))
-                coordinate = f"{t_name}.{f_name}"
-                field_hits[coordinate] = hits
-                if hits > 0:
-                    covered_fields.append(coordinate)
-                else:
-                    uncovered_fields.append(coordinate)
+    @staticmethod
+    def evaluate_graph(data: dict[str, Any], run_id: str, min_coverage: float) -> GateEvaluation:
+        if not 0 <= min_coverage <= 100:
+            raise ValueError("min-coverage must be between 0 and 100")
+        field_hits = graph_field_hits(data)
+        covered_fields = [coordinate for coordinate, count in field_hits.items() if count > 0]
+        uncovered_fields = [coordinate for coordinate, count in field_hits.items() if count == 0]
 
         summary = data.get("summary") or {}
-        total = summary.get("total_fields", len(field_hits))
-        covered = summary.get("covered_fields", len(covered_fields))
+        total = summary.get("totalFields", summary.get("total_fields", len(field_hits)))
+        covered = summary.get("coveredFields", summary.get("covered_fields", len(covered_fields)))
 
+        if total != len(field_hits) or covered != len(covered_fields):
+            raise ValueError("Coverage summary does not match the fields")
         if total > 0:
             coverage_percent = round((covered / total) * 100.0, 2)
         else:
@@ -231,8 +232,8 @@ class CoverageQualityGate:
             uncovered_fields=sorted(uncovered_fields),
             covered_field_names=sorted(covered_fields),
             field_hits=field_hits,
-            service_id=str(data.get("service_id") or "") or None,
-            schema_id=str(data.get("schema_id") or "") or None,
+            service_id=str(data.get("serviceId") or data.get("service_id") or "") or None,
+            schema_id=str(data.get("schemaId") or data.get("schema_id") or "") or None,
         )
 
     @staticmethod
@@ -248,8 +249,8 @@ class CoverageQualityGate:
 
         lines = [
             '<?xml version="1.0" encoding="utf-8"?>',
-            f'<testsuites name="GraphQL Coverage Gate" tests="2" failures="{failures_count}" errors="0" time="0.05">',
-            f'  <testsuite name="gitlab.coverage_gate" tests="2" failures="{failures_count}" errors="0" time="0.05">',
+            f'<testsuites name="GraphQL Coverage Gate" tests="1" failures="{failures_count}" errors="0" time="0.05">',
+            f'  <testsuite name="gitlab.coverage_gate" tests="1" failures="{failures_count}" errors="0" time="0.05">',
             f'    <testcase classname="gitlab.coverage_gate" name="test_field_coverage_threshold" time="0.03">',
         ]
 
@@ -268,7 +269,6 @@ class CoverageQualityGate:
 
         lines.extend([
             '    </testcase>',
-            f'    <testcase classname="gitlab.coverage_gate" name="test_schema_completeness" time="0.02"/>',
             '  </testsuite>',
             '</testsuites>',
         ])
@@ -302,112 +302,10 @@ class CoverageQualityGate:
 
 
 def render_gitlab_ci_template() -> str:
-    """Return production-ready .gitlab-ci.yml template for GitLab CI."""
-    return """# ==============================================================================
-# GitLab CI Pipeline for GraphQL Coverage Proxy & QA
-#
-# Supported architectures:
-# Option A (Recommended): Observer Mode
-#   Tests run inside this runner. All GraphQL requests route through the proxy.
-#   Quality Gate checks the coverage threshold and exports JUnit XML + coverage regex.
-#
-# Option B: Remote Trigger Mode
-#   TestLab or webhooks trigger this pipeline with variable COVERAGE_RUN_ID.
-# ==============================================================================
-
-stages:
-  - preflight
-  - test
-  - quality-gate
-
-variables:
-  PYTHON_VERSION: "3.12"
-  COVERAGE_URL: "http://coverage-proxy:8000"
-  COVERAGE_MIN_PERCENT: "80.0"
-  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
-  PLAYWRIGHT_BROWSERS_PATH: "$CI_PROJECT_DIR/.browsers"
-
-cache:
-  key: "$CI_COMMIT_REF_SLUG"
-  paths:
-    - .cache/pip
-    - .browsers
-
-# ------------------------------------------------------------------------------
-# Stage 1: Preflight Lint & Hygiene
-# ------------------------------------------------------------------------------
-lint-and-hygiene:
-  stage: preflight
-  image: python:3.12-slim
-  before_script:
-    - python -V
-    - pip install -r requirements.txt
-    - pip install -e . --no-deps
-  script:
-    - python -m coverage_qa preflight --quick
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    - if: '$CI_PIPELINE_SOURCE == "trigger"'
-
-# ------------------------------------------------------------------------------
-# Stage 2: Execute Tests Through GraphQL Coverage Proxy
-# ------------------------------------------------------------------------------
-run-api-tests:
-  stage: test
-  image: python:3.12-slim
-  before_script:
-    - pip install -r requirements.lock.txt
-    - pip install -e . --no-deps
-  script:
-    - echo "Executing tests against proxy: $COVERAGE_URL"
-    - python -m coverage_qa test --suite all --report-dir reports/
-  artifacts:
-    when: always
-    expire_in: 7 days
-    paths:
-      - reports/
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    - if: '$CI_PIPELINE_SOURCE == "trigger"'
-
-# ------------------------------------------------------------------------------
-# Stage 3: GraphQL Coverage Quality Gate & GitLab Reporting
-# ------------------------------------------------------------------------------
-graphql-coverage-gate:
-  stage: quality-gate
-  image: python:3.12-slim
-  before_script:
-    - pip install -r requirements.txt
-    - pip install -e . --no-deps
-  script:
-    - |
-      RUN_ID="${COVERAGE_RUN_ID:-latest}"
-      python -m coverage_qa gitlab gate \\
-        --coverage-url "$COVERAGE_URL" \\
-        --api-key "$COVERAGE_API_KEY" \\
-        --run-id "$RUN_ID" \\
-        --min-coverage "$COVERAGE_MIN_PERCENT" \\
-        --junit-out reports/junit.xml \\
-        --csv-out reports/coverage.csv \\
-        --summary-out reports/coverage-summary.json
-  # GitLab native coverage regex parsing:
-  coverage: '/Total coverage:\\s*([0-9.]+)%/'
-  artifacts:
-    when: always
-    expire_in: 30 days
-    reports:
-      junit: reports/junit.xml
-    paths:
-      - reports/junit.xml
-      - reports/coverage.csv
-      - reports/coverage-summary.json
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    - if: '$CI_PIPELINE_SOURCE == "trigger"'
-"""
+    from sysconfig import get_path
+    checkout = Path(__file__).resolve().parents[2] / ".gitlab-ci.yml"
+    installed = Path(get_path("data")) / "share/graphql-coverage-qa/.gitlab-ci.yml"
+    return (checkout if checkout.is_file() else installed).read_text(encoding="utf-8")
 
 
 def _cmd_gate(args: argparse.Namespace) -> int:
@@ -416,7 +314,12 @@ def _cmd_gate(args: argparse.Namespace) -> int:
         api_key=args.api_key,
     )
     try:
-        eval_result = gate.evaluate(args.run_id, min_coverage=args.min_coverage)
+        if args.graph_file:
+            graph = json.loads(args.graph_file.read_text(encoding="utf-8"))
+            run_id = str(UUID(graph["runId"]))
+            eval_result = gate.evaluate_graph(graph, run_id, args.min_coverage)
+        else:
+            eval_result = gate.evaluate(args.run_id, min_coverage=args.min_coverage)
     except Exception as exc:
         print(f"Error evaluating coverage for run {args.run_id}: {exc}", file=sys.stderr)
         return 1
@@ -462,10 +365,8 @@ def _cmd_trigger(args: argparse.Namespace) -> int:
 
     if args.run_id:
         variables["COVERAGE_RUN_ID"] = args.run_id
-    if args.coverage_url:
-        variables["COVERAGE_PROXY_URL"] = args.coverage_url
-    if args.min_coverage:
-        variables["MIN_COVERAGE"] = str(args.min_coverage)
+    if args.min_coverage is not None:
+        variables["COVERAGE_MIN_PERCENT"] = str(args.min_coverage)
 
     try:
         pipeline = client.trigger_pipeline(
@@ -515,7 +416,7 @@ def _cmd_trigger(args: argparse.Namespace) -> int:
     if final_status == "success" and args.run_id and args.coverage_url:
         gate = CoverageQualityGate(coverage_url=args.coverage_url, api_key=args.api_key)
         try:
-            res = gate.evaluate(args.run_id, min_coverage=args.min_coverage or 80.0)
+            res = gate.evaluate(args.run_id, min_coverage=80.0 if args.min_coverage is None else args.min_coverage)
             print(res.gitlab_metric_line)
             return 0 if res.passed else 1
         except Exception as exc:
@@ -557,7 +458,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Subcommand: gate
     gate_parser = subparsers.add_parser("gate", help="Evaluate coverage gate and export GitLab artifacts")
-    gate_parser.add_argument("--run-id", required=True, help="Test run UUID in Coverage Proxy")
+    source = gate_parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--graph-file", type=Path, help="Saved coverage response for this pipeline")
+    source.add_argument("--run-id", help="Test run UUID in Coverage Proxy")
     gate_parser.add_argument("--coverage-url", default=os.environ.get("COVERAGE_URL", "http://localhost:8000"), help="Coverage Proxy base URL")
     gate_parser.add_argument("--api-key", default=os.environ.get("COVERAGE_API_KEY"), help="Coverage Proxy API key")
     gate_parser.add_argument("--min-coverage", type=float, default=80.0, help="Minimum acceptable coverage percent (0-100)")
@@ -572,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
     trigger_parser.add_argument("--ref", default="main", help="Target git ref (branch/tag)")
     trigger_parser.add_argument("--host", default=DEFAULT_GITLAB_HOST, help="GitLab server URL")
     trigger_parser.add_argument("--run-id", help="Coverage run UUID to pass as variable")
-    trigger_parser.add_argument("--coverage-url", help="Coverage URL to pass as variable")
+    trigger_parser.add_argument("--coverage-url", help="Coverage URL for an additional local gate after --wait")
     trigger_parser.add_argument("--api-key", default=os.environ.get("COVERAGE_API_KEY"), help="Coverage Proxy API key")
     trigger_parser.add_argument("--min-coverage", type=float, default=80.0, help="Minimum coverage threshold")
     trigger_parser.add_argument("--variable", "-V", action="append", dest="variables", help="Additional variable in KEY=VALUE format")
