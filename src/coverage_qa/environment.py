@@ -32,6 +32,10 @@ TEAM_BACKEND = find_backend()
 def source_identity(directory):
     result = {"path": str(Path(directory).resolve()), "commit": None, "dirty": None}
     try:
+        root = subprocess.run(["git", "-C", str(directory), "rev-parse", "--show-toplevel"],
+                              capture_output=True, text=True, timeout=5)
+        if root.returncode != 0 or Path(root.stdout.strip()).resolve() != Path(directory).resolve():
+            return result
         commit = subprocess.run(["git", "-C", str(directory), "rev-parse", "HEAD"],
                                 capture_output=True, text=True, timeout=5)
         if commit.returncode == 0:
@@ -157,7 +161,6 @@ class CoverageStack:
         if self.compose_started:
             with (self.folder / "infrastructure.log").open("a", encoding="utf-8") as log:
                 try:
-                    # Only this unique project is removed; there are no host data volumes.
                     subprocess.run([*self.command, "down", "--remove-orphans"], stdout=log,
                                    stderr=subprocess.STDOUT, check=True, timeout=30)
                 except Exception as exc:

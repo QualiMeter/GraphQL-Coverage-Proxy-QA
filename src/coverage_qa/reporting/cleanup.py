@@ -4,7 +4,6 @@ import json
 import os
 import shutil
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -57,6 +56,8 @@ def clean_runs(
     dry_run: bool = False,
 ) -> dict:
     from coverage_qa.environment import ROOT
+    if keep < 0 or (max_age_days is not None and max_age_days < 0):
+        raise ValueError("keep and max_age_days must be nonnegative")
     root = Path(report_dir).resolve()
     if report_dir == "reports" and not (Path.cwd() / "src" / "coverage_qa").exists() and (ROOT / "reports" / "runs").exists():
         root = (ROOT / "reports").resolve()
@@ -71,7 +72,6 @@ def clean_runs(
             "retained_runs": [],
         }
 
-    # Find latest run ID to protect
     latest_run_id = None
     latest_file = root / "latest.json"
     if latest_file.exists():
@@ -85,7 +85,7 @@ def clean_runs(
     now = datetime.now(timezone.utc)
 
     for run_path in sorted(runs_dir.iterdir()):
-        if not run_path.is_dir():
+        if run_path.is_symlink() or run_path.is_junction() or not run_path.is_dir():
             continue
         manifest_file = run_path / "manifest.json"
         manifest = {}
@@ -95,7 +95,6 @@ def clean_runs(
             except Exception:
                 pass
 
-        # Protect currently active or running sessions
         if manifest.get("status") in {"starting", "running"}:
             continue
         if (run_path / "cancel.requested").exists() and not manifest.get("finishedAt"):
@@ -106,6 +105,8 @@ def clean_runs(
         if started_str:
             try:
                 started_dt = datetime.fromisoformat(started_str)
+                if started_dt.tzinfo is None:
+                    started_dt = started_dt.replace(tzinfo=timezone.utc)
             except ValueError:
                 pass
         if started_dt is None:
@@ -120,19 +121,16 @@ def clean_runs(
             "is_latest": (run_path.name == latest_run_id),
         })
 
-    # Sort descending by start time (newest first)
     candidates.sort(key=lambda c: c["started_dt"], reverse=True)
 
     retained = []
     to_delete = []
 
     for index, c in enumerate(candidates):
-        # Keep latest designated run always
         if c["is_latest"] or index < keep:
             retained.append(c)
             continue
 
-        # If max_age_days given, check age
         if max_age_days is not None:
             age_days = (now - c["started_dt"]).total_seconds() / 86400.0
             if age_days < max_age_days:
@@ -141,13 +139,17 @@ def clean_runs(
 
         to_delete.append(c)
 
-    freed_bytes = sum(c["size"] for c in to_delete)
+    freed_bytes = 0
     deleted_ids = []
 
     for c in to_delete:
-        deleted_ids.append(c["id"])
         if not dry_run:
-            shutil.rmtree(c["path"], ignore_errors=True)
+            target = c["path"].resolve()
+            if target.parent != runs_dir.resolve():
+                raise ValueError("Run directory is outside the report root")
+            shutil.rmtree(target)
+        deleted_ids.append(c["id"])
+        freed_bytes += c["size"]
 
     if not dry_run and deleted_ids:
         rebuild_history_index(root)

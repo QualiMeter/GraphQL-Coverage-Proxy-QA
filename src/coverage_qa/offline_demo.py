@@ -1,4 +1,3 @@
-"""Offline demo and Plan B showcase generator and diagnostic runner."""
 import argparse
 import html
 import json
@@ -6,7 +5,6 @@ import os
 import shutil
 import socket
 import sys
-import time
 from pathlib import Path
 
 import httpx
@@ -17,7 +15,7 @@ from coverage_qa.environment import ROOT
 VPS_ENDPOINTS = [
     ("Healthcheck", "https://graphql.rebyte.fun/health", 200),
     ("Coverage Proxy UI", "https://graphql.rebyte.fun/coverage/", 200),
-    ("TestLab QA Panel", "https://graphql.rebyte.fun/qa/", 401),  # Protected by Basic Auth
+    ("TestLab QA Panel", "https://graphql.rebyte.fun/qa/", 401),
     ("FORMA Demo Shop", "https://graphql.rebyte.fun/shop/", 200),
 ]
 
@@ -37,7 +35,7 @@ def check_port(port: int, host: str = "127.0.0.1") -> bool:
 
 def check_connectivity() -> dict:
     vps_results = []
-    with httpx.Client(timeout=3.0, verify=False, trust_env=False) as client:
+    with httpx.Client(timeout=3.0, trust_env=False) as client:
         for name, url, expected_status in VPS_ENDPOINTS:
             try:
                 resp = client.get(url)

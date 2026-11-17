@@ -1,14 +1,11 @@
-"""View saved reports over loopback HTTP. No API calls or mutations are performed."""
-
 import argparse
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from coverage_qa.environment import ROOT
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description='Serve QA reports.')
     parser.add_argument("--port", type=int, default=9010)
     args = parser.parse_args()
     folder = ROOT / "reports"

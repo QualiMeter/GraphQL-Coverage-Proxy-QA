@@ -1,5 +1,3 @@
-"""Public-path delivery is explicit; command endpoints stay origin-checked."""
-
 from fastapi.testclient import TestClient
 
 from coverage_qa.control_panel import Manager, create_app
@@ -27,10 +25,10 @@ def test_configured_public_origin_allows_post_but_rejects_foreign(tmp_path, monk
     with TestClient(create_app(manager)) as client:
         assert client.post("/api/runs", json=payload, headers={
             **headers, "Origin": "https://graphql.rebyte.fun"
-        }).status_code == 400  # Passed origin check; invalid selection.
+        }).status_code == 400
         assert client.post("/api/runs", json=payload, headers={
             **headers, "Origin": "https://graphql.rebyte.fun.attacker.invalid"
         }).status_code == 403
         assert client.post("/api/runs", json=payload, headers={
             "Origin": "https://graphql.rebyte.fun"
-        }).status_code == 403  # Still requires the in-memory panel token.
+        }).status_code == 403

@@ -1,4 +1,3 @@
-"""TST-07 acceptance test: verify server-side run coverage in React UI against REST API."""
 import mimetypes
 import os
 import re
@@ -77,7 +76,6 @@ def test_tst07_run_coverage_in_react(coverage_run, request):
     run = coverage_run
     folder = request.config.run_folder
 
-    # 1. Сформировать реальное покрытие через GraphQL-запросы прокси
     query = '{ user(id: "1") { id name orders { total } } }'
     run.graphql(
         "TST-07: Запрос карточки пользователя с заказами",
@@ -85,7 +83,6 @@ def test_tst07_run_coverage_in_react(coverage_run, request):
         fields={"Query.user", "User.id", "User.name", "User.orders", "Order.total"},
     )
 
-    # 2. Опубликовать сервис и задать явное имя для селектора в React
     run.rest(
         "Задать имя и опубликовать тестовый сервис для анонимного просмотра в React",
         "PATCH",
@@ -93,34 +90,27 @@ def test_tst07_run_coverage_in_react(coverage_run, request):
         {"name": "TST-07 Service", "isPublic": True},
     )
 
-    # 3. Получить эталонный граф покрытия из REST API
     checkpoint = run.snapshot("TST-07: Контрольный снимок покрытия из REST")
     cov_api = checkpoint["graph"]
     summary = cov_api["summary"]
     run.expect_fields(checkpoint, {"Query.user", "User.id", "User.name", "User.orders", "Order.total"})
 
-    # 4. Подготовить адрес фронтенда (локальный bridge или публичный стенд)
-    live_base = request.config.getoption("--live-base-url")
     server = None
     server_thread = None
 
-    if live_base:
-        frontend_url = f"{live_base.rstrip('/')}/coverage/"
-    else:
-        dist_dir = find_frontend_dist()
-        if not dist_dir:
-            pytest.skip(
-                "Frontend production build (dist/index.html) not found in CI environment. "
-                "Run 'npm run build' inside GraphQL-Coverage-Proxy-Frontend to execute TST-07."
-            )
-        FrontendBridge.dist_dir = dist_dir
-        FrontendBridge.backend_base = run.base
-        server = ThreadingHTTPServer(("127.0.0.1", 0), FrontendBridge)
-        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-        server_thread.start()
-        frontend_url = f"http://127.0.0.1:{server.server_port}/coverage/"
+    dist_dir = find_frontend_dist()
+    if not dist_dir:
+        pytest.skip(
+            "Frontend production build (dist/index.html) not found. "
+            "Run 'npm run build' inside GraphQL-Coverage-Proxy-Frontend."
+        )
+    FrontendBridge.dist_dir = dist_dir
+    FrontendBridge.backend_base = run.base
+    server = ThreadingHTTPServer(("127.0.0.1", 0), FrontendBridge)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    frontend_url = f"http://127.0.0.1:{server.server_port}/coverage/"
 
-    # 5. Запуск браузера Playwright и проверка React-интерфейса
     with sync_playwright() as playwright:
         channel = os.environ.get("API_TEST_BROWSER_CHANNEL")
         if not channel and os.name == "nt":
@@ -148,11 +138,9 @@ def test_tst07_run_coverage_in_react(coverage_run, request):
             context = browser.new_context(viewport={"width": 1400, "height": 950})
             page = context.new_page()
 
-            # Открыть интерфейс покрытия
             page.goto(frontend_url, wait_until="domcontentloaded", timeout=20000)
             page.wait_for_selector(".analytics-app", timeout=15000)
 
-            # Выбрать созданный сервис в выпадающем меню
             service_button = page.locator("button.context-trigger", has_text="Сервис")
             service_button.click()
             page.get_by_role("dialog", name="Сервис").get_by_role(
@@ -177,7 +165,6 @@ def test_tst07_run_coverage_in_react(coverage_run, request):
                 ).locator("strong")
                 expect(metric).to_have_text(expected)
 
-            # Проверка 2: Узлы графа ReactFlow показывают точный процент и статус полей
             for t in cov_api["types"]:
                 node = page.locator(".type-node").filter(
                     has=page.locator("header strong", has_text=re.compile(f"^{re.escape(t['name'])}$"))
@@ -200,7 +187,6 @@ def test_tst07_run_coverage_in_react(coverage_run, request):
 
             run.api.expect("React граф: Все типы и поля отображают правильный статус покрытия", True, True)
 
-            # Проверка 3: Переключение в режим таблицы и поколоночная сверка с REST
             page.locator(".segmented button", has_text="Таблица").click()
             page.wait_for_selector(".schema-coverage-table", timeout=5000)
 
@@ -227,7 +213,6 @@ def test_tst07_run_coverage_in_react(coverage_run, request):
 
             run.api.expect("React таблица: Число сверенных строк полей", verified_fields, summary["totalFields"])
 
-            # Сохранение скриншотов в отчёт
             table_screenshot = folder / "tst07-table-coverage.png"
             page.screenshot(path=str(table_screenshot), full_page=True)
             run.api.entry["events"].append({

@@ -1,8 +1,3 @@
-"""Business rules are tested by HTTP and re-reading committed PostgreSQL state.
-
-Every test runs twice: direct GraphQL endpoint and unchanged Coverage Proxy.
-"""
-
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 

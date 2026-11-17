@@ -1,4 +1,3 @@
-import html
 import json
 import shutil
 import time
@@ -14,7 +13,6 @@ def save_json(path, value):
     path = Path(path)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-    # Windows can temporarily deny replacing a destination being read by the panel.
     for attempt in range(12):
         try:
             temporary.replace(path)
@@ -54,7 +52,6 @@ def update_history(folder, report):
     rebuild_history_index(root)
     latest = root / "latest"
     latest.mkdir(exist_ok=True)
-    # Preserve the pre-history implementation's report before replacing its entry page.
     if (latest / "results.json").exists() and not (root / "legacy-latest").exists():
         shutil.copytree(latest, root / "legacy-latest")
     target = f"../runs/{folder.name}/index.html"

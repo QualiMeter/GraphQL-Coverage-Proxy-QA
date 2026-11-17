@@ -1,4 +1,3 @@
-"""Run selected acceptance tests and retain an immutable evidence report."""
 import argparse
 import json
 import os
@@ -48,7 +47,7 @@ def select_paths(extra, parser, suite, live):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description='Run QA tests and save reports.')
     parser.add_argument("--suite", choices=("coverage", "business", "e2e", "tooling", "live", "all"), default="all")
     parser.add_argument("--local", action="store_true", help="Disposable infrastructure is the default")
     parser.add_argument("--coverage-url", help="Existing test proxy, configured for the controlled upstream")

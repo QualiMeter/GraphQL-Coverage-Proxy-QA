@@ -1,5 +1,3 @@
-"""Loopback HTTP interface for pytest runs."""
-
 import argparse
 import hashlib
 import hmac
@@ -33,7 +31,6 @@ DEPLOYED_SERVICE_KEY = "forma-demo-shop"
 
 
 def deployed_settings():
-    """Only server-side configuration; never return the API key to a browser."""
     url = os.environ.get("QA_DEPLOYED_COVERAGE_URL", "").strip().rstrip("/")
     shop = os.environ.get("QA_DEPLOYED_SHOP_API_URL", "").strip().rstrip("/")
     key = os.environ.get("COVERAGE_API_KEY", "").strip()
@@ -228,8 +225,6 @@ class Manager:
         if load(folder / "manifest.json", {}).get("status") != "starting":
             raise HTTPException(409, "Запуск уже завершён")
         (folder / "cancel.requested").touch()
-        # The pytest setup hook stops before the next test. Let the current
-        # request and fixture teardown finish, including PostgreSQL cleanup.
 
 
 class StartRequest(BaseModel):
@@ -386,7 +381,7 @@ def create_app(manager=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description='Local QA panel.')
     parser.add_argument("--port", type=int, default=9020)
     args = parser.parse_args()
     import uvicorn

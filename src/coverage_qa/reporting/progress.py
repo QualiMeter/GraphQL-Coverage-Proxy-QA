@@ -44,7 +44,6 @@ def emit(*, force=False):
             try:
                 save_json(live / (evidence_id(entry["id"]) + ".json"), {**entry, "events": events})
             except OSError:
-                # Live telemetry must not abort functional tests. The complete report is saved separately.
                 warning = "Live-снимок временно недоступен; полные доказательства сохраняются в results.json."
                 if warning not in report.setdefault("liveWarnings", []):
                     report["liveWarnings"].append(warning)

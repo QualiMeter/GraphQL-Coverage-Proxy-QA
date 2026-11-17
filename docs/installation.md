@@ -59,3 +59,10 @@ export COVERAGE_BACKEND_DIR=/path/to/backend
 ## Остановка
 
 Панель: Ctrl+C в её терминале. Магазин: `docker compose -p gql-commerce-demo -f examples/shop/compose.yaml down`, данные остаются в volume. Автотесты очищают свои контейнеры автоматически, а отчёты оставляют на диске.
+
+
+## GitHub Actions
+
+Workflow API integration tests загружает backend и frontend, собирает dist для TST-07, устанавливает Chromium для Python и Node.js Playwright и выполняет приёмку MVP с проверкой порога 66.67%.
+
+Для закрытых командных репозиториев настройте secrets COVERAGE_BACKEND_TOKEN и COVERAGE_FRONTEND_TOKEN с доступом на чтение соответствующего репозитория. При ручном запуске можно выбрать backend_ref и frontend_ref. Без доступа checkout завершится ошибкой. Артефакты сохраняются и при падении тестов.

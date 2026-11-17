@@ -1,4 +1,3 @@
-"""Dry-run script executing all expert demo scenarios from README_EXPERTS.md Sections 4 and 5."""
 import os
 import sys
 import time
@@ -39,17 +38,11 @@ def run_dry_run():
         context = browser.new_context(viewport={"width": 1440, "height": 950})
         page = context.new_page()
 
-        # -------------------------------------------------------------
-        # STEP 1: Открытие витрины магазина
-        # -------------------------------------------------------------
         log("1/8", "Открытие витрины FORMA Demo Shop (http://127.0.0.1:9110/)")
         page.goto("http://127.0.0.1:9110/", wait_until="networkidle")
         expect(page.get_by_test_id("product-keyboard")).to_be_visible()
         page.screenshot(path=str(out_dir / "01_catalog.png"))
 
-        # -------------------------------------------------------------
-        # STEP 2: Добавление клавиатуры и кабеля в корзину
-        # -------------------------------------------------------------
         log("2/8", "Выбор товаров: Mechanical Keyboard (1 шт.) и USB-C Cable (2 шт.)")
         page.get_by_test_id("product-keyboard").get_by_role("button", name="В корзину +", exact=True).click()
         page.get_by_test_id("product-cable").get_by_role("button", name="В корзину +", exact=True).click()
@@ -60,9 +53,6 @@ def run_dry_run():
         log("2/8", f"Итого в корзине: {cart_total}")
         page.screenshot(path=str(out_dir / "02_cart.png"))
 
-        # -------------------------------------------------------------
-        # STEP 3: Вход под демо-профилем Alice
-        # -------------------------------------------------------------
         log("3/8", "Оформление заказа: выбор демо-профиля Alice")
         page.get_by_role("button", name="Оформить заказ", exact=True).click()
         expect(page.locator("#login-dialog")).to_be_visible()
@@ -71,9 +61,6 @@ def run_dry_run():
         page.locator("#login-form").get_by_role("button", name="Войти", exact=True).click()
         expect(page.locator("#login-dialog")).not_to_be_visible()
 
-        # -------------------------------------------------------------
-        # STEP 4: Подтверждение заказа и получение ID
-        # -------------------------------------------------------------
         log("4/8", "Оформление покупки и получение номера заказа")
         page.get_by_role("button", name="Оформить заказ", exact=True).click()
         expect(page.get_by_test_id("success-order-id")).to_be_visible()
@@ -81,9 +68,6 @@ def run_dry_run():
         log("4/8", f"Заказ успешно создан в PostgreSQL! ID: {order_id}")
         page.screenshot(path=str(out_dir / "04_order_success.png"))
 
-        # -------------------------------------------------------------
-        # STEP 5: Просмотр истории заказов
-        # -------------------------------------------------------------
         log("5/8", "Переход в «Мои заказы», сверка статуса CREATED")
         page.get_by_role("button", name="Посмотреть заказ", exact=True).click()
         order_card = page.get_by_test_id("order-" + order_id)
@@ -91,9 +75,6 @@ def run_dry_run():
         expect(order_card.locator(".status-pill")).to_have_text("Создан")
         page.screenshot(path=str(out_dir / "05_orders_list.png"))
 
-        # -------------------------------------------------------------
-        # STEP 6: Отмена заказа и возврат остатков
-        # -------------------------------------------------------------
         log("6/8", "Отмена заказа: подтверждение диалога и смена статуса на «Отменён»")
         order_card.get_by_role("button", name="Отменить заказ", exact=True).click()
         expect(page.locator("#cancel-dialog")).to_be_visible()
@@ -101,9 +82,6 @@ def run_dry_run():
         expect(order_card.locator(".status-pill")).to_have_text("Отменён")
         page.screenshot(path=str(out_dir / "06_order_cancelled.png"))
 
-        # -------------------------------------------------------------
-        # STEP 7: Проверка API-инспектора и маскирования секретов
-        # -------------------------------------------------------------
         log("7/8", "Открытие API-инспектора: проверка журнала GraphQL и маскирования")
         page.locator("#inspector-button").click()
         expect(page.locator("#inspector-dialog")).to_be_visible()
@@ -113,9 +91,6 @@ def run_dry_run():
         page.screenshot(path=str(out_dir / "07_api_inspector.png"))
         page.locator('[data-close="inspector-dialog"]').click()
 
-        # -------------------------------------------------------------
-        # STEP 8: Вход под Administrator и обзор статистики
-        # -------------------------------------------------------------
         log("8/8", "Вход под Admin: проверка панели статистики магазина")
         page.locator("#account-button").click()
         page.locator("#logout").click()
@@ -129,7 +104,6 @@ def run_dry_run():
 
         browser.close()
 
-    # Генерация сводного HTML-отчёта сухого прогона
     html_report = out_dir / "index.html"
     rows_html = "".join(f"<tr><td><strong>{s['step']}</strong></td><td>{s['desc']}</td><td>{s['time']}</td><td><span style='color:#1e8e3e;font-weight:600;'>✓ OK</span></td></tr>" for s in steps_log)
 

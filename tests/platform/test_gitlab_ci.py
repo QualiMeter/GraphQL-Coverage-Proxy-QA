@@ -1,5 +1,3 @@
-"""Tests for GitLab CI integration (Option A: Observer/Gate & Option B: Trigger)."""
-
 import json
 import re
 from pathlib import Path
@@ -20,9 +18,6 @@ from coverage_qa.gitlab_ci import (
 )
 
 
-# ------------------------------------------------------------------------------
-# Mock Data Fixtures
-# ------------------------------------------------------------------------------
 @pytest.fixture
 def sample_coverage_graph_pass():
     return {
@@ -57,7 +52,7 @@ def sample_coverage_graph_pass():
                     {"name": "id", "hits": 3},
                     {"name": "title", "hits": 3},
                     {"name": "price", "hits": 3},
-                    {"name": "sku", "hits": 0},  # 1 uncovered field
+                    {"name": "sku", "hits": 0},
                 ],
             },
         ],
@@ -104,9 +99,6 @@ def sample_coverage_graph_fail():
     }
 
 
-# ------------------------------------------------------------------------------
-# Option A: Quality Gate Tests
-# ------------------------------------------------------------------------------
 @pytest.mark.case("GitLab CI: Quality Gate оценивает успешное покрытие выше порога")
 def test_gate_evaluation_passing(sample_coverage_graph_pass):
     gate = CoverageQualityGate("http://mock-proxy")
@@ -138,7 +130,6 @@ def test_gate_evaluation_failing(sample_coverage_graph_fail):
 def test_junit_xml_report_generation(tmp_path, sample_coverage_graph_pass, sample_coverage_graph_fail):
     gate = CoverageQualityGate()
 
-    # 1. Проверяем успешный отчёт
     with patch.object(gate, "fetch_coverage", return_value=sample_coverage_graph_pass):
         pass_res = gate.evaluate("run-pass", min_coverage=80.0)
     pass_xml = tmp_path / "pass_junit.xml"
@@ -149,7 +140,6 @@ def test_junit_xml_report_generation(tmp_path, sample_coverage_graph_pass, sampl
     assert "<failure" not in content_pass
     assert "test_field_coverage_threshold" in content_pass
 
-    # 2. Проверяем отчёт с ошибкой порога
     with patch.object(gate, "fetch_coverage", return_value=sample_coverage_graph_fail):
         fail_res = gate.evaluate("run-fail", min_coverage=80.0)
     fail_xml = tmp_path / "fail_junit.xml"
@@ -183,9 +173,6 @@ def test_csv_and_summary_export(tmp_path, sample_coverage_graph_pass):
     assert summary_data["passed"] is True
 
 
-# ------------------------------------------------------------------------------
-# Option B: GitLab Client & Trigger Tests
-# ------------------------------------------------------------------------------
 @pytest.mark.case("GitLab Client: Запуск пайплайна через Trigger Token")
 def test_gitlab_trigger_pipeline_trigger_token():
     client = GitLabClient(host="https://gitlab.example.com", token="trigger-token-abc")
@@ -261,9 +248,6 @@ def test_gitlab_poll_pipeline_lifecycle():
     assert observed_statuses == ["pending", "running", "success"]
 
 
-# ------------------------------------------------------------------------------
-# CLI Commands Tests
-# ------------------------------------------------------------------------------
 @pytest.mark.case("CLI: coverage-qa gitlab template выводит корректный .gitlab-ci.yml")
 def test_cli_gitlab_template(tmp_path, capsys):
     out_file = tmp_path / "generated-ci.yml"
@@ -293,9 +277,6 @@ def test_cli_gitlab_gate_exit_codes(capsys, sample_coverage_graph_pass, sample_c
     assert "Status: FAILED" in out_fail
 
 
-# ------------------------------------------------------------------------------
-# Root .gitlab-ci.yml Structure and Regex Compatibility
-# ------------------------------------------------------------------------------
 @pytest.mark.case("GitLab CI: Корневой .gitlab-ci.yml валиден и содержит все обязательные стадии")
 def test_root_gitlab_ci_yaml_validity():
     gitlab_ci_file = ROOT / ".gitlab-ci.yml"
@@ -308,21 +289,16 @@ def test_root_gitlab_ci_yaml_validity():
     assert "graphql-coverage-gate:" in text
     assert "coverage:" in text
 
-    # Проверяем regex паттерн для парсинга покрытия
     match_regex = re.search(r"coverage:\s*['\"](/.*?/)['\"]", text)
     assert match_regex is not None, "В job graphql-coverage-gate должно быть указано поле coverage с регулярным выражением"
     regex_pattern = match_regex.group(1).strip("/")
 
-    # Проверяем, что регулярное выражение из конфигурации совпадает с выводом gate
     sample_line = "Total coverage: 85.50%"
     match = re.search(regex_pattern, sample_line)
     assert match is not None
     assert match.group(1) == "85.50"
 
 
-# ------------------------------------------------------------------------------
-# TestLab Panel API Endpoints Tests
-# ------------------------------------------------------------------------------
 @pytest.fixture
 def panel_client(tmp_path):
     manager = Manager(tmp_path / "reports")

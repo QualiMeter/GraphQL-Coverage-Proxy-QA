@@ -1,4 +1,3 @@
-"""Deployed FORMA mode may only reuse a verified active demo run."""
 from uuid import uuid4
 
 import httpx

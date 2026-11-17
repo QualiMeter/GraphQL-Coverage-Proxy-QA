@@ -8,16 +8,30 @@ on:
         description: Coverage backend ref to test
         default: main
         required: true
+      frontend_ref:
+        description: Coverage frontend ref to test
+        default: main
+        required: true
   push:
   pull_request:
 jobs:
   integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/api-tests/.browsers
+      QA_FRONTEND_DIST: ${{ github.workspace }}/coverage-frontend/dist
     steps:
       - uses: actions/checkout@v4
         with:
           path: api-tests
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: QualiMeter/GraphQL-Coverage-Proxy-Frontend
+          ref: ${{ inputs.frontend_ref || 'main' }}
+          path: coverage-frontend
+          token: ${{ secrets.COVERAGE_FRONTEND_TOKEN || github.token }}
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
@@ -29,30 +43,37 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build frontend for TST-07
+        working-directory: coverage-frontend
+        run: |
+          npm ci
+          npm run build
       - run: python -m pip install -r requirements.lock.txt
         working-directory: api-tests
       - run: python -m pip install -e . --no-deps
         working-directory: api-tests
       - run: python -m playwright install --with-deps chromium
         working-directory: api-tests
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/api-tests/.browsers
       - run: python -m coverage_qa test --coverage-backend-dir ../coverage-backend
         working-directory: api-tests
       - name: Backend unit tests for analysis, schema parsing and document storage
         working-directory: coverage-backend
         run: python -m pytest -q tests/test_query_analyzer.py tests/test_schema_parser.py tests/test_safe_document.py
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
       - name: Install MVP acceptance dependencies
         working-directory: api-tests
         run: |
           python -m pip install -r acceptance/mvp/requirements.txt
           npm ci --prefix acceptance/mvp
+          cd acceptance/mvp
+          npx --no-install playwright install --with-deps chromium
       - name: Verify nine-field MVP and persistence
         working-directory: api-tests
-        run: python -m acceptance.mvp.run
+        run: |
+          python -m acceptance.mvp.run --export-graph reports/gate-input.json
+          python -m coverage_qa gitlab gate --graph-file reports/gate-input.json --min-coverage 66.67 --junit-out reports/gate.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:

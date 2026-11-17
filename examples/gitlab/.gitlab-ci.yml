@@ -1,4 +1,3 @@
-# Consumer project. Install the reviewed QA revision and evaluate a real run.
 stages: [quality-gate]
 
 verify-external-run:

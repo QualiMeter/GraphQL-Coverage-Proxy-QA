@@ -44,7 +44,6 @@ def audit_repository_files(repo_root: Path) -> list[dict]:
             if file in ALLOWED_FILES:
                 continue
             file_path = Path(root) / file
-            # Only scan text files under 2 MB
             try:
                 if file_path.stat().st_size > 2 * 1024 * 1024:
                     continue
@@ -72,20 +71,37 @@ def audit_reports(report_root: Path) -> list[dict]:
     if not runs_dir.exists():
         return violations
 
-    sensitive_key_names = {"password", "token", "accesstoken", "secret", "authorization"}
+    sensitive_key_names = {
+        "password", "token", "accesstoken", "refreshtoken", "secret", "apikey",
+        "authorization", "cookie", "setcookie", "xcoverageapikey", "xcsrftoken",
+        "csrftoken", "currentpassword", "newpassword", "sessiontoken",
+    }
+
+    def unmasked_keys(value):
+        if isinstance(value, dict):
+            for name, child in value.items():
+                normalized = name.lower().replace("_", "").replace("-", "")
+                if normalized in sensitive_key_names:
+                    if child not in (None, "<redacted>", "<скрыто>"):
+                        yield name
+                else:
+                    yield from unmasked_keys(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from unmasked_keys(child)
 
     for results_file in runs_dir.glob("*/results.json"):
         try:
             data = json.loads(results_file.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, ValueError):
+            violations.append({"file": results_file.relative_to(report_root).as_posix(),
+                               "rule": "Report could not be read as JSON"})
             continue
 
         rel_path = results_file.relative_to(report_root).as_posix()
 
-        # Check events in each test
         for test in data.get("tests", []):
             for event in test.get("events", []):
-                # Check headers
                 headers = event.get("headers", {})
                 for h_name, h_val in headers.items():
                     if any(s in h_name.lower() for s in ("auth", "key", "token", "cookie")) and h_val != "<redacted>":
@@ -94,24 +110,17 @@ def audit_reports(report_root: Path) -> list[dict]:
                             "rule": f"Unmasked sensitive header '{h_name}' in event '{event.get('title')}'",
                         })
 
-                # Check payload requests
-                req = event.get("request")
-                if isinstance(req, dict):
-                    for k, v in req.items():
-                        if k.lower() in sensitive_key_names and v not in ("<redacted>", "<скрыто>"):
-                            violations.append({
-                                "file": rel_path,
-                                "rule": f"Unmasked key '{k}' in request payload of '{event.get('title')}'",
-                            })
+                for section in ("request", "response"):
+                    for key in unmasked_keys(event.get(section)):
+                        violations.append({"file": rel_path,
+                                           "rule": f"Unmasked key '{key}' in {section} payload"})
 
     return violations
 
 
-def run_security_audit(workspace_root: Path | str = ".", check_reports: bool = True) -> dict:
+def run_security_audit(workspace_root: Path | str | None = None, check_reports: bool = True) -> dict:
     from coverage_qa.environment import ROOT
-    workspace = Path(workspace_root).resolve()
-    if not (workspace / "src" / "coverage_qa").exists() and (ROOT / "src" / "coverage_qa").exists():
-        workspace = ROOT
+    workspace = Path(workspace_root).resolve() if workspace_root is not None else ROOT
     repo_violations = audit_repository_files(workspace)
     report_violations = audit_reports(workspace / "reports") if check_reports else []
 
@@ -127,26 +136,19 @@ def run_security_audit(workspace_root: Path | str = ".", check_reports: bool = T
 
 def main():
     parser = argparse.ArgumentParser(description="Security audit: scan for unmasked secrets, credentials, and token leaks.")
-    parser.add_argument("--workspace", default=".", help="Root directory to scan (default: .)")
+    parser.add_argument("--workspace", help="Root directory to scan (default: QA project)")
     parser.add_argument("--no-reports", action="store_true", help="Skip scanning generated reports/runs")
     args = parser.parse_args()
 
     result = run_security_audit(args.workspace, check_reports=not args.no_reports)
 
-    print("=" * 60)
-    print("  SECURITY & SECRETS AUDIT GATE")
-    print("=" * 60)
-
     if result["passed"]:
-        print("  ✓ PASS: No unmasked secrets, private keys, or token leaks found.")
-        print("=" * 60)
+        print("Configured security checks passed.")
         return 0
-    else:
-        print(f"  ✗ FAIL: Found {len(result['violations'])} security violation(s):")
-        for v in result["violations"]:
-            print(f"    • [{v['file']}] {v['rule']}")
-        print("=" * 60)
-        return 1
+    print(f"Security findings: {len(result['violations'])}")
+    for violation in result["violations"]:
+        print(f"[{violation['file']}] {violation['rule']}")
+    return 1
 
 
 if __name__ == "__main__":

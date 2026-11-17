@@ -1,4 +1,3 @@
-# Install as .gitlab-ci.yml in the GitLab coordination project.
 stages: [source, qa]
 workflow:
   rules:

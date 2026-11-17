@@ -1,9 +1,7 @@
-# Virtual environments
 .venv/
 venv/
 ENV/
 
-# Python cache & artifacts
 __pycache__/
 *.py[cod]
 *$py.class
@@ -11,7 +9,6 @@ __pycache__/
 build/
 dist/
 
-# Testing & reports
 .pytest_cache/
 .tmp/
 reports/
@@ -20,20 +17,16 @@ reports/
 htmlcov/
 *.log
 
-# Browsers & Playwright
 .browsers/
 test-results/
 playwright-report/
 
-# Node / JS
 node_modules/
 
-# Secrets & Environment
 .env
 .env.*
 !.env.example
 
-# IDE & OS
 .idea/
 .vscode/
 *.swp

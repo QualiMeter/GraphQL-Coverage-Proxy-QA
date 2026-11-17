@@ -1,6 +1,20 @@
+import subprocess
+
 import pytest
 
-from coverage_qa.environment import CoverageStack, find_backend
+from coverage_qa.environment import CoverageStack, find_backend, source_identity
+
+
+def test_source_copy_does_not_inherit_parent_repository_commit(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "tracked").write_text("fixture", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.test",
+                    "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"], cwd=tmp_path, check=True)
+    nested = tmp_path / "backend-copy"
+    nested.mkdir()
+    assert source_identity(tmp_path)["commit"] is not None
+    assert source_identity(nested)["commit"] is None
 
 
 @pytest.mark.case("Установка: backend находится в соседнем Git checkout")

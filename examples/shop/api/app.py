@@ -1,8 +1,3 @@
-"""Independent GraphQL service with PostgreSQL transactions and business rules.
-
-This is test-project code. It does not import or replace the team's coverage backend.
-"""
-
 import hashlib
 import hmac
 import json
@@ -60,7 +55,6 @@ async def read_order(pool, order_id, user):
 async def login(_, info, email, password):
     pool = info.context["pool"]
     row = await pool.fetchrow("SELECT * FROM customers WHERE email=$1", email.strip().lower())
-    # Do the password work for unknown accounts too; no account-existence message.
     stored = row["password_hash"] if row else password_hash("unused-password", "unknown-user")
     valid = hmac.compare_digest(password_hash(password, stored.split(":", 1)[0]), stored)
     if not row or not valid:
@@ -118,7 +112,6 @@ async def create_order(_, info, input):
     pool = info.context["pool"]
     async with pool.acquire() as conn:
         async with conn.transaction():
-            # Serialize idempotency keys for one customer; different buyers still compete for product locks.
             await conn.fetchrow("SELECT id FROM customers WHERE id=$1 FOR UPDATE", user["id"])
             existing = await conn.fetchrow("SELECT * FROM orders WHERE customer_id=$1 AND idempotency_key=$2", user["id"], key)
             if existing:

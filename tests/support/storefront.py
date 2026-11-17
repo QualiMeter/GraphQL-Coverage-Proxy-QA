@@ -20,7 +20,6 @@ from coverage_qa.reporting.progress import emit, evidence_id
 def storefront(request):
     deployed_run_id = request.config.getoption("--deployed-run-id")
     if deployed_run_id:
-        # No disposable Docker stack in this mode: use the real, controlled demo shop.
         business_stack = SimpleNamespace(
             proxy=SimpleNamespace(base=request.config.getoption("--coverage-url").rstrip("/")),
             upstream=SimpleNamespace(base=request.config.getoption("--upstream-url").rstrip("/")),
@@ -55,7 +54,6 @@ def storefront(request):
 
     try:
         if deployed_run_id:
-            # Attach to a running Coverage session; never create or finish the user's run.
             run.run_id = deployed_run_id
             run.record = {"testId": request.node.nodeid, "serviceId": None,
                           "snapshotId": None, "runId": run.run_id, "schemaHash": None,
@@ -143,7 +141,7 @@ def storefront(request):
         finally:
             if run.run_id:
                 if run.deployed:
-                    run.finished = True  # report phase only; production run stays active
+                    run.finished = True
                 else:
                     run.finish()
                 run.snapshot("Фактическое покрытие браузерного магазина")

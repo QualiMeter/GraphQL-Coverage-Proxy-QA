@@ -1,34 +1,20 @@
-"""GitLab CI integration for GraphQL Coverage Proxy.
-
-Supports two enterprise models:
-1. Option A (Observer / In-Pipeline Gate):
-   Tests run inside GitLab CI runner; requests pass through GraphQL Coverage Proxy.
-   Quality Gate verifies coverage thresholds, logs GitLab regex coverage metric,
-   and exports JUnit XML and HTML reports for Merge Requests.
-2. Option B (Remote Pipeline Trigger):
-   TestLab or CLI triggers a GitLab CI pipeline via GitLab API v4,
-   polls the execution status, and links the resulting coverage run.
-"""
-
 from __future__ import annotations
 
 import argparse
 import csv
 import json
 import os
-import re
 import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable
 from urllib.parse import quote_plus
 from uuid import UUID
 from xml.sax.saxutils import escape
 
 import httpx
 
-from coverage_qa.environment import ROOT
 from coverage_qa.reporting.metrics import graph_field_hits
 
 DEFAULT_GITLAB_HOST = "https://gitlab.com"
@@ -51,7 +37,6 @@ class GateEvaluation:
 
     @property
     def gitlab_metric_line(self) -> str:
-        """Formatted string matching GitLab CI coverage regex."""
         return f"Total coverage: {self.coverage_percent:.2f}%"
 
     def to_dict(self) -> dict[str, Any]:
@@ -59,7 +44,6 @@ class GateEvaluation:
 
 
 class GitLabClient:
-    """Client for GitLab CI/CD API v4."""
 
     def __init__(
         self,
@@ -75,7 +59,6 @@ class GitLabClient:
     def _normalize_project_id(self, project_id: str | int) -> str:
         if isinstance(project_id, int) or str(project_id).isdigit():
             return str(project_id)
-        # URL encode namespace/project (e.g. org/repo -> org%2Frepo)
         return quote_plus(str(project_id).strip())
 
     def trigger_pipeline(
@@ -85,7 +68,6 @@ class GitLabClient:
         token: str | None = None,
         variables: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Trigger a pipeline using either a Trigger Token or a Personal/Project Access Token."""
         auth_token = token or self.token
         if not auth_token:
             raise ValueError("GitLab token is required to trigger a pipeline")
@@ -93,7 +75,6 @@ class GitLabClient:
         pid = self._normalize_project_id(project_id)
         vars_dict = variables or {}
 
-        # If token starts with glpat- (Personal Access Token), use /pipeline endpoint
         if auth_token.startswith("glpat-") or auth_token.startswith("glcbt-"):
             url = f"{self.host}/api/v4/projects/{pid}/pipeline"
             headers = {"PRIVATE-TOKEN": auth_token, "Content-Type": "application/json"}
@@ -106,7 +87,6 @@ class GitLabClient:
                 resp.raise_for_status()
                 return resp.json()
 
-        # Otherwise use standard GitLab trigger endpoint /trigger/pipeline
         url = f"{self.host}/api/v4/projects/{pid}/trigger/pipeline"
         data = {"token": auth_token, "ref": ref}
         for k, v in vars_dict.items():
@@ -123,7 +103,6 @@ class GitLabClient:
         pipeline_id: str | int,
         token: str | None = None,
     ) -> dict[str, Any]:
-        """Retrieve details of a GitLab pipeline."""
         pid = self._normalize_project_id(project_id)
         url = f"{self.host}/api/v4/projects/{pid}/pipelines/{pipeline_id}"
         auth_token = token or self.token
@@ -148,7 +127,6 @@ class GitLabClient:
         poll_interval: float = 5.0,
         callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        """Poll pipeline until completion or timeout."""
         terminal_statuses = {"success", "failed", "canceled", "skipped", "manual"}
         deadline = time.monotonic() + timeout
 
@@ -167,7 +145,6 @@ class GitLabClient:
 
 
 class CoverageQualityGate:
-    """Evaluates coverage data from GraphQL Coverage Proxy and builds reports."""
 
     def __init__(
         self,
@@ -180,7 +157,6 @@ class CoverageQualityGate:
         self.timeout = timeout
 
     def fetch_coverage(self, run_id: str) -> dict[str, Any]:
-        """Fetch raw coverage graph from Coverage Proxy."""
         expected_id = str(UUID(run_id))
         url = f"{self.coverage_url}/api/runs/{expected_id}/coverage"
         headers = {}
@@ -196,7 +172,6 @@ class CoverageQualityGate:
             return graph
 
     def evaluate(self, run_id: str, min_coverage: float = 80.0) -> GateEvaluation:
-        """Evaluate coverage graph against min_coverage threshold."""
         data = self.fetch_coverage(run_id)
 
         return self.evaluate_graph(data, run_id, min_coverage)
@@ -238,7 +213,6 @@ class CoverageQualityGate:
 
     @staticmethod
     def generate_junit_xml(evaluation: GateEvaluation, out_path: Path | str) -> Path:
-        """Generate JUnit XML report for GitLab CI Test Report tab."""
         target = Path(out_path).resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -279,7 +253,6 @@ class CoverageQualityGate:
 
     @staticmethod
     def generate_csv(evaluation: GateEvaluation, out_path: Path | str) -> Path:
-        """Export coverage field table to CSV."""
         target = Path(out_path).resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -294,7 +267,6 @@ class CoverageQualityGate:
 
     @staticmethod
     def generate_summary_json(evaluation: GateEvaluation, out_path: Path | str) -> Path:
-        """Export summary JSON file."""
         target = Path(out_path).resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(evaluation.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
@@ -324,7 +296,6 @@ def _cmd_gate(args: argparse.Namespace) -> int:
         print(f"Error evaluating coverage for run {args.run_id}: {exc}", file=sys.stderr)
         return 1
 
-    # Print GitLab-compatible coverage regex output
     print("=" * 60)
     print(f"GraphQL Coverage Quality Gate: RUN {eval_result.run_id}")
     print(eval_result.gitlab_metric_line)
@@ -412,7 +383,6 @@ def _cmd_trigger(args: argparse.Namespace) -> int:
     final_status = final_info.get("status")
     print(f"Pipeline completed with status: {final_status}")
 
-    # If run_id and coverage_url provided, run coverage gate evaluation
     if final_status == "success" and args.run_id and args.coverage_url:
         gate = CoverageQualityGate(coverage_url=args.coverage_url, api_key=args.api_key)
         try:
@@ -456,7 +426,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
 
-    # Subcommand: gate
     gate_parser = subparsers.add_parser("gate", help="Evaluate coverage gate and export GitLab artifacts")
     source = gate_parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--graph-file", type=Path, help="Saved coverage response for this pipeline")
@@ -468,7 +437,6 @@ def main(argv: list[str] | None = None) -> int:
     gate_parser.add_argument("--csv-out", help="Path to write CSV coverage report")
     gate_parser.add_argument("--summary-out", help="Path to write JSON summary")
 
-    # Subcommand: trigger
     trigger_parser = subparsers.add_parser("trigger", help="Trigger remote GitLab CI pipeline")
     trigger_parser.add_argument("--project", required=True, help="GitLab Project ID or URL-encoded path")
     trigger_parser.add_argument("--token", required=True, help="GitLab Trigger token or Access token")
@@ -483,14 +451,12 @@ def main(argv: list[str] | None = None) -> int:
     trigger_parser.add_argument("--timeout", type=float, default=600.0, help="Wait timeout in seconds")
     trigger_parser.add_argument("--poll-interval", type=float, default=5.0, help="Polling interval in seconds")
 
-    # Subcommand: status
     status_parser = subparsers.add_parser("status", help="Get status of GitLab pipeline")
     status_parser.add_argument("--project", required=True, help="GitLab Project ID")
     status_parser.add_argument("--pipeline", required=True, help="GitLab Pipeline ID")
     status_parser.add_argument("--token", help="GitLab Access token")
     status_parser.add_argument("--host", default=DEFAULT_GITLAB_HOST, help="GitLab server URL")
 
-    # Subcommand: template
     template_parser = subparsers.add_parser("template", help="Generate ready-to-use .gitlab-ci.yml")
     template_parser.add_argument("--out", help="Target output file path")
 
