@@ -61,7 +61,7 @@
 - Список `/requests` не содержит selectedFields; detail `/requests/{requestId}` содержит фактические поля и countedInCoverage. Отчёт сохраняет оба уровня и сопоставляет HTTP-вызов с detail только при однозначной связи. `declaredSelectedFields` остаётся независимым ожиданием, а не измерением.
 - Связь с pytestNodeId хранится в metadata прогона и артефактах тестов; новые колонки БД не добавляются.
 - Multi-service проверяется двумя настоящими upstream с разными ответами. Проверяются опасные URL и отсутствие обхода endpoint через introspection payload. Полный DNS-rebinding/SSRF/resource-limit аудит остаётся за специализированными тестами backend.
-- Cookie-сессии viewer/analyst/operator, CSRF, grants, отзыв grant, скрытая metadata и logout проверяются по HTTP. TLS/Secure-cookie через production Nginx, last-admin и конкурентные security races остаются в специализированном наборе backend. Основной frontend этим набором не открывается.
+- Cookie-сессии viewer/analyst/operator, CSRF, grants, отзыв grant, скрытая metadata и logout проверяются по HTTP. TLS/Secure-cookie через production Nginx, last-admin и конкурентные security races остаются в специализированном наборе backend. TST-07 отдельно открывает production-сборку основного frontend и сверяет покрытие с REST.
 
 Тесты не изменяют командный backend/frontend. Тестовый upstream и HTML для одного E2E находятся в `tests/support/upstream/`; бизнес-API и витрина — в `examples/shop/`.
 

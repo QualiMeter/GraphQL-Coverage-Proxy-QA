@@ -65,4 +65,6 @@ export COVERAGE_BACKEND_DIR=/path/to/backend
 
 Workflow API integration tests загружает backend и frontend, собирает dist для TST-07, устанавливает Chromium для Python и Node.js Playwright и выполняет приёмку MVP с проверкой порога 66.67%.
 
+Для этого workflow закреплён runner `ubuntu-24.04`: Playwright 1.58.2 из acceptance/mvp/package-lock.json поддерживает этот образ. `ubuntu-latest` перешёл на Ubuntu 26.04, которую эта версия Playwright не поддерживает. Обновляйте версию ОС вместе с браузерными зависимостями и проверкой MVP. [Изменение ubuntu-latest](https://github.blog/changelog/2026-09-17-ubuntu-26-generally-available-and-latest-migration/).
+
 Для закрытых командных репозиториев настройте secrets COVERAGE_BACKEND_TOKEN и COVERAGE_FRONTEND_TOKEN с доступом на чтение соответствующего репозитория. При ручном запуске можно выбрать backend_ref и frontend_ref. Без доступа checkout завершится ошибкой. Артефакты сохраняются и при падении тестов.
