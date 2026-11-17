@@ -129,19 +129,50 @@ def test_duplicate_fields_in_one_request(coverage_run):
 @pytest.mark.parametrize("query,operation,expected_status", [
     pytest.param("{", None, "parse_error", id="syntax"),
     pytest.param("{ missingField }", None, "validation_error", id="validation"),
-    pytest.param('query Fragment { user(id: "1") { ...U } } fragment U on User { id name }', "Fragment", "unsupported", id="fragment"),
+    pytest.param('query MissingFragment { user(id: "1") { ...Unknown } }', "MissingFragment", "validation_error", id="unknown-fragment"),
+    pytest.param('query Cycle { user(id: "1") { ...A } } fragment A on User { id ...B } fragment B on User { name ...A }', "Cycle", "validation_error", id="cyclic-fragment"),
 ])
-@pytest.mark.case("Ошибка или неподдерживаемый анализ сохраняется без ложного покрытия")
+@pytest.mark.case("Ошибка разбора или валидации сохраняется без ложного покрытия")
 def test_analysis_failures(coverage_run, query, operation, expected_status):
     r = coverage_run
-    status, body = r.graphql("Передать операцию upstream независимо от анализа", query, operation=operation)
+    status, _ = r.graphql("Передать операцию upstream независимо от анализа", query, operation=operation)
     r.api.expect("Запрос дошёл upstream", status, 200)
-    if expected_status == "unsupported":
-        r.api.expect("Upstream исполнил поддерживаемый им fragment", body.get("errors", []), [])
     checkpoint = r.snapshot("После ошибочного анализа")
     r.expect_fields(checkpoint, set())
     r.api.expect("Есть ровно одно наблюдение", len(checkpoint["requests"]), 1)
     r.api.expect("Честный статус анализатора", checkpoint["requests"][0]["analysisStatus"], expected_status)
+
+
+@pytest.mark.parametrize("query,operation,variables,expected_fields", [
+    pytest.param('query Named { user(id: "1") { ...U } } fragment U on User { id name }',
+                 "Named", {}, MINIMAL_FIELDS, id="named"),
+    pytest.param('query Inline { user(id: "1") { ... on User { id name } } }',
+                 "Inline", {}, MINIMAL_FIELDS, id="inline"),
+    pytest.param('query Nested { user(id: "1") { ...U ...U id } } fragment U on User { ...Identity displayName: name } fragment Identity on User { id }',
+                 "Nested", {}, MINIMAL_FIELDS, id="nested-repeated-alias"),
+    pytest.param('query Conditional($show: Boolean!) { user(id: "1") { id ...Name @include(if: $show) } } fragment Name on User { name }',
+                 "Conditional", {"show": False}, {"Query.user", "User.id"}, id="include-false"),
+    pytest.param('query Conditional($show: Boolean!) { user(id: "1") { id ...Name @include(if: $show) } } fragment Name on User { name }',
+                 "Conditional", {"show": True}, MINIMAL_FIELDS, id="include-true"),
+])
+@pytest.mark.case("Fragments: точные поля схемы, условия и один hit на поле за запрос")
+def test_fragment_coverage(coverage_run, query, operation, variables, expected_fields):
+    r = coverage_run
+    body = successful(r, query, expected_fields, operation, variables)
+    r.api.expect("Upstream вернул пользователя", body["data"]["user"]["id"], "1")
+    checkpoint = r.snapshot("Покрытие запроса с fragments")
+    r.expect_fields(checkpoint, expected_fields)
+    r.api.expect("Один HTTP-запрос даёт одно наблюдение", len(checkpoint["requests"]), 1)
+    observation = checkpoint["requests"][0]
+    r.api.expect("Fragment проанализирован успешно", observation["analysisStatus"], "success")
+    detail = checkpoint["requestDetails"][0]
+    r.api.expect("Запрос учтён в покрытии", detail["countedInCoverage"], True)
+    r.api.expect("Detail содержит точные координаты схемы",
+                 sorted(f"{field['typeName']}.{field['fieldName']}" for field in detail["selectedFields"]),
+                 sorted(expected_fields))
+    r.api.expect("Повтор fragments и aliases не увеличивает hits внутри запроса",
+                 {coordinate: count for coordinate, count in checkpoint["fieldHits"].items() if count},
+                 {coordinate: 1 for coordinate in expected_fields})
 
 
 @pytest.mark.case("Подписка (Subscription): статус unsupported, countedInCoverage=False, отсутствие ложного покрытия")

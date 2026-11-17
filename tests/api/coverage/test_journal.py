@@ -103,11 +103,13 @@ def test_analysis_statuses_and_percentiles(coverage_run):
     send(r, "{", None)
     send(r, "{missingField}", None)
     send(r, 'query Frag{user(id:"1"){...U}} fragment U on User{id}', "Frag")
+    send(r, 'subscription OnUserChange { user(id: "1") { id name } }', "OnUserChange")
     rows = r.rest("Измерения длительности из БД", "GET", f"/api/runs/{r.run_id}/requests")
     stats = r.rest("Статистика смешанного прогона", "GET", f"/api/runs/{r.run_id}/stats")
     r.api.expect("Распределение статусов анализа", stats["analysisStatusCounts"],
-                 {"success": 1, "parseError": 1, "validationError": 1, "unsupported": 1, "internalError": 0})
-    r.api.expect("Все обращения учтены в статистике", stats["totalRequests"], 4)
+                 {"success": 2, "parseError": 1, "validationError": 1, "unsupported": 1, "internalError": 0})
+    r.api.expect("Все обращения учтены в статистике", stats["totalRequests"], 5)
+    r.api.expect("Обычный query и fragment учтены в покрытии", stats["countedRequests"], 2)
     durations = sorted(x["durationMs"] for x in rows if x["durationMs"] is not None)
     position = (len(durations) - 1) * .95
     lo, hi = math.floor(position), math.ceil(position)

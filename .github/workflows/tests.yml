@@ -46,6 +46,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Record component revisions
+        run: |
+          python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          revisions = {
+              name: subprocess.check_output(["git", "-C", path, "rev-parse", "HEAD"], text=True).strip()
+              for name, path in {"qa": "api-tests", "backend": "coverage-backend", "frontend": "coverage-frontend"}.items()
+          }
+          output = Path("api-tests/reports/component-revisions.json")
+          output.parent.mkdir(parents=True, exist_ok=True)
+          output.write_text(json.dumps(revisions, indent=2), encoding="utf-8")
+          print(json.dumps(revisions, indent=2))
+          PY
       - name: Build frontend for TST-07
         working-directory: coverage-frontend
         run: |

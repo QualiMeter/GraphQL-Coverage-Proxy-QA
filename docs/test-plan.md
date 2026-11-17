@@ -1,6 +1,6 @@
 # Требования и проверки
 
-Основа — публичный контракт и исходники backend main `7c7f09354623d6d03ca64453d93daf944a7c62c3`. Ссылки на поддерживаемые endpoints и границы проверки перечислены в [backend-compatibility.md](backend-compatibility.md).
+Основа — публичный контракт и исходники backend main `41db524295e5cbf27a100bd417f62ddc896b30d6`. Ссылки на поддерживаемые endpoints и границы проверки перечислены в [backend-compatibility.md](backend-compatibility.md).
 
 | Требование | Сценарий | Доказательство |
 |---|---|---|
@@ -10,7 +10,8 @@
 | Вложенные поля | demo_three_runs | Query.user → User.orders → Order.total |
 | Aliases, variables, include | aliases_variables_and_directives | Настоящие имена полей, пропущенное поле не учитывается |
 | Выбор операции | selected_operation | Поля только выбранного operationName |
-| Честный отказ анализа | analysis_failures | parse_error / validation_error / unsupported, без ложного покрытия |
+| Fragments | fragment_coverage | Named/inline fragments, вложенные повторы, aliases и @include; точные selectedFields и один hit на поле за запрос |
+| Честный отказ анализа | analysis_failures, subscription_unsupported_handling | parse_error / validation_error для ошибочных документов, unsupported для subscription; без ложного покрытия |
 | Частичные и ошибочные ответы | response_semantics | Отдельно HTTP, data, errors и фактически учтённые поля |
 | Повторы | demo_three_runs | Hits растёт, уникальные поля и процент не растут |
 | История | demo_three_runs | Три ID прогонов, старые результаты неизменны |
@@ -55,7 +56,7 @@
 ## Ограничения текущего контракта
 
 - Метрика описывает выбранные поля запроса при успешном анализе и объекте data. Частичный ответ с errors может учитываться; тест не объявляет это успешным исполнением каждого резолвера.
-- Fragments поддерживаются тестовым upstream, но текущим анализатором помечаются unsupported. Это проверяется явно.
+- Named/inline fragments поддерживаются анализатором. QA проверяет точные координаты и hits, вложенные повторы, aliases и @include с true/false. Неизвестные и циклические fragments должны давать validation_error без покрытия. Subscription остаётся unsupported; отдельный тест и смешанная статистика проверяют это независимо от fragments.
 - Сетевые ошибки и таймауты не записываются текущим обработчиком как ObservedRequest. Тест фиксирует контракт, а не придумывает запись.
 - Список `/requests` не содержит selectedFields; detail `/requests/{requestId}` содержит фактические поля и countedInCoverage. Отчёт сохраняет оба уровня и сопоставляет HTTP-вызов с detail только при однозначной связи. `declaredSelectedFields` остаётся независимым ожиданием, а не измерением.
 - Связь с pytestNodeId хранится в metadata прогона и артефактах тестов; новые колонки БД не добавляются.
