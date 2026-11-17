@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: coverage_tests
+      POSTGRES_USER: coverage_tests
+      POSTGRES_PASSWORD: isolated_local_tests
+    ports:
+      - "127.0.0.1::5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coverage_tests -d coverage_tests"]
+      interval: 1s
+      timeout: 3s
+      retries: 30

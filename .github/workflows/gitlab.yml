@@ -1,0 +1,40 @@
+name: GitLab QA
+on:
+  push:
+    branches: [main, feat/qa-platform-and-demo-shop]
+  workflow_dispatch:
+
+permissions: {}
+jobs:
+  gitlab:
+    if: vars.GITLAB_API_URL != '' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/qa-platform-and-demo-shop')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GITLAB_API_URL: ${{ vars.GITLAB_API_URL }}
+      GITLAB_PROJECT_ID: ${{ vars.GITLAB_PROJECT_ID }}
+      GITLAB_REF: ${{ vars.GITLAB_REF }}
+      GITLAB_TOKEN: ${{ secrets.GITLAB_PROJECT_TOKEN }}
+    steps:
+      - name: Run GitLab pipeline for this GitHub commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${GITLAB_TOKEN:?Configure GITLAB_PROJECT_TOKEN}"
+          : "${GITLAB_PROJECT_ID:?Configure GITLAB_PROJECT_ID}"
+          : "${GITLAB_REF:?Configure GITLAB_REF}"
+          [[ "$GITLAB_API_URL" == https://* ]]
+          api="${GITLAB_API_URL%/}/projects/$GITLAB_PROJECT_ID"
+          payload=$(jq -n --arg ref "$GITLAB_REF" --arg sha "$GITHUB_SHA" '{ref:$ref,variables:[{key:"QA_GITHUB_SHA",value:$sha}]}')
+          result=$(curl -fsS -H "PRIVATE-TOKEN: $GITLAB_TOKEN" -H 'Content-Type: application/json' -d "$payload" "$api/pipeline")
+          id=$(jq -er '.id | numbers' <<< "$result")
+          url=$(jq -er '.web_url' <<< "$result")
+          echo "GitLab pipeline: $url" >> "$GITHUB_STEP_SUMMARY"
+          while true; do
+            status=$(curl -fsS --retry 3 -H "PRIVATE-TOKEN: $GITLAB_TOKEN" "$api/pipelines/$id" | jq -er '.status')
+            case "$status" in
+              success) exit 0 ;;
+              created|waiting_for_resource|preparing|pending|running) sleep 20 ;;
+              *) echo "GitLab pipeline $id: $status"; exit 1 ;;
+            esac
+          done

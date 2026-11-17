@@ -1,0 +1,393 @@
+import argparse
+import hashlib
+import hmac
+import json
+import os
+import re
+import secrets
+import subprocess
+import sys
+import threading
+from uuid import UUID
+
+import httpx
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from coverage_qa.reporting.history import new_run, save_json, update_history
+from coverage_qa.reporting.html import write_report
+
+
+from coverage_qa.environment import ROOT
+
+WEB = Path(__file__).resolve().parent / "web"
+RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
+DEPLOYED_SERVICE_KEY = "forma-demo-shop"
+
+
+def deployed_settings():
+    url = os.environ.get("QA_DEPLOYED_COVERAGE_URL", "").strip().rstrip("/")
+    shop = os.environ.get("QA_DEPLOYED_SHOP_API_URL", "").strip().rstrip("/")
+    key = os.environ.get("COVERAGE_API_KEY", "").strip()
+    return url, shop, key
+
+
+def validate_deployed_run(run_id):
+    try:
+        parsed_id = str(UUID(run_id))
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(400, "Введите корректный UUID прогона из Coverage")
+    if parsed_id != run_id.lower():
+        raise HTTPException(400, "Введите UUID прогона без дополнительных символов")
+    url, shop, key = deployed_settings()
+    if not (url and shop and key):
+        raise HTTPException(503, "Режим FORMA не настроен: добавьте адреса и ключ в защищённый файл VPS")
+    try:
+        with httpx.Client(timeout=8.0, trust_env=False) as client:
+            services_response = client.get(url + "/api/services", headers={"X-Coverage-Api-Key": key})
+            services_response.raise_for_status()
+            service = next((row for row in services_response.json()
+                            if row.get("key") == DEPLOYED_SERVICE_KEY), None)
+            if not service:
+                raise HTTPException(409, "Сервис FORMA Demo Shop отсутствует в Coverage")
+            runs_response = client.get(url + "/api/runs",
+                                       params={"serviceId": service["id"], "status": "running"},
+                                       headers={"X-Coverage-Api-Key": key})
+            runs_response.raise_for_status()
+            if not any(row.get("id", "").lower() == parsed_id for row in runs_response.json()):
+                raise HTTPException(409, "Выбранный прогон FORMA не активен или принадлежит другому сервису")
+            shop_response = client.post(shop + "/graphql",
+                                        json={"query": "{ __typename }"})
+            shop_response.raise_for_status()
+            if shop_response.json().get("errors"):
+                raise HTTPException(503, "Demo Shop API не отвечает корректно")
+    except httpx.HTTPError:
+        raise HTTPException(503, "Не удалось проверить Coverage или Demo Shop; проверьте адреса и доступ")
+    except (ValueError, KeyError, TypeError):
+        raise HTTPException(503, "Coverage вернул неожиданный ответ")
+    return parsed_id, url, shop
+
+
+
+def load(path, default=None):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
+class Manager:
+    def __init__(self, reports=None):
+        self.reports = Path(reports or ROOT / "reports").resolve()
+        self.reports.mkdir(parents=True, exist_ok=True)
+        self.state = self.reports / ".panel"
+        self.state.mkdir(exist_ok=True)
+        self.token = secrets.token_urlsafe(32)
+        self.lock = threading.Lock()
+        self.process = None
+        self.active = load(self.state / "active.json", {}).get("id")
+        self._catalog = None
+
+    def catalog(self):
+        if self._catalog is None:
+            target = self.state / "catalog.json"
+            result = subprocess.run([
+                sys.executable, "-m", "pytest", "-c", str(ROOT / "pyproject.toml"),
+                str(ROOT / "tests"), "--collect-only", "-q", "--catalog-file", str(target),
+            ], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"}, timeout=40)
+            if result.returncode:
+                raise RuntimeError("Не удалось получить список тестов: " + result.stdout[-2000:] + result.stderr[-1000:])
+            self._catalog = [x for x in load(target, []) if x["group"] != "legacy"]
+        return self._catalog
+
+    def folder(self, id):
+        if not RUN_ID.fullmatch(id):
+            raise HTTPException(400, "Некорректный ID запуска")
+        path = self.reports / "runs" / id
+        if not (path / "manifest.json").exists():
+            raise HTTPException(404, "Запуск не найден")
+        return path
+
+    def history(self):
+        rows = []
+        for path in sorted((self.reports / "runs").glob("*/manifest.json"), reverse=True):
+            m = load(path)
+            if not m:
+                continue
+            rows.append({k: m.get(k) for k in ("id", "label", "suite", "status", "startedAt", "localTime", "finishedAt", "passed", "failed", "skipped", "exitCode")})
+        return rows
+
+    def snapshot(self, id):
+        folder = self.folder(id)
+        manifest = load(folder / "manifest.json", {})
+        progress = load(folder / "progress.json")
+        if not progress:
+            result = load(folder / "results.json", {})
+            selected = load(folder / "selection.json", [])
+            catalog = {x["id"]: x for x in self.catalog()}
+            tests = result.get("tests", []) or [{**catalog.get(x, {"id": x, "title": x}), "status": "pending"} for x in selected]
+            progress = {"id": id, "tests": [{**{k: t.get(k, catalog.get(t["id"], {}).get(k)) for k in ("id", "title", "variant", "group", "status", "duration")},
+                                               "evidenceId": hashlib.sha256(t["id"].encode()).hexdigest()[:16]} for t in tests],
+                        "passed": sum(t["status"] == "passed" for t in tests),
+                        "failed": sum(t["status"] == "failed" for t in tests),
+                        "skipped": sum(t["status"] == "skipped" for t in tests),
+                        "requests": sum(e["kind"] == "request" for t in tests for e in t.get("events", [])),
+                        "checks": sum(e["kind"] == "check" for t in tests for e in t.get("events", [])),
+                        "failedChecks": 0, "activeTest": None}
+        return {**progress, "manifest": manifest, "cancelRequested": (folder / "cancel.requested").exists(),
+                "reportUrl": f"/reports/runs/{id}/index.html" if (folder / "index.html").exists() else None}
+
+    def evidence(self, id, key):
+        if not re.fullmatch(r"[a-f0-9]{16}", key):
+            raise HTTPException(400, "Некорректный ID сценария")
+        folder = self.folder(id)
+        evidence = load(folder / "live" / (key + ".json"))
+        if evidence is None:
+            for test in load(folder / "results.json", {}).get("tests", []):
+                if hashlib.sha256(test["id"].encode()).hexdigest()[:16] == key:
+                    evidence = test
+                    break
+        if evidence is None:
+            return {"events": [], "status": "pending", "title": "Сценарий ещё не выполнялся"}
+        return evidence
+
+    def start(self, ids, label, include_live, deployed_run_id=None):
+        catalog = {x["id"]: x for x in self.catalog()}
+        selected = list(dict.fromkeys(ids))
+        if not selected or any(x not in catalog for x in selected):
+            raise HTTPException(400, "Выберите существующие сценарии")
+        if any(catalog[x]["group"] == "live" for x in selected) and not include_live:
+            raise HTTPException(400, "Для публичного сервера включите GET-only проверки")
+        if deployed_run_id is not None:
+            if include_live or any(catalog[x]["group"] != "e2e" for x in selected):
+                raise HTTPException(400, "В рабочем режиме FORMA разрешены только браузерные E2E-сценарии")
+            deployed_run_id, deployed_url, deployed_shop = validate_deployed_run(deployed_run_id)
+        with self.lock:
+            if self.active:
+                try:
+                    manifest = self.snapshot(self.active).get("manifest", {})
+                    is_running = self.process is not None and self.process.poll() is None
+                    if manifest.get("status") == "starting" and is_running:
+                        raise HTTPException(409, "Один запуск уже выполняется")
+                    if not is_running:
+                        self.active = None
+                except HTTPException as exc:
+                    if exc.status_code == 409:
+                        raise
+                    self.active = None
+            folder = new_run(self.reports, label, "panel")
+            save_json(folder / "selection.json", selected)
+            command = [sys.executable, "-m", "coverage_qa", "test", "--suite", "all", "--local",
+                       "--report-dir", str(self.reports), "--run-folder", str(folder),
+                       "--selection-file", str(folder / "selection.json"), "--label", label]
+            if deployed_run_id is not None:
+                command[command.index("all")] = "e2e"
+                command += ["--coverage-url", deployed_url, "--upstream-url", deployed_shop,
+                            "--deployed-run-id", deployed_run_id]
+            elif include_live:
+                command += ["--live-base-url", "https://graphql.rebyte.fun"]
+            log = (folder / "panel.log").open("w", encoding="utf-8")
+            try:
+                self.process = subprocess.Popen(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                                                env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"})
+            except Exception:
+                log.close()
+                raise
+            self.active = folder.name
+            save_json(self.state / "active.json", {"id": self.active, "pid": self.process.pid})
+            threading.Thread(target=self._monitor, args=(self.process, folder, log), daemon=True).start()
+            return folder.name
+
+    def _monitor(self, process, folder, log):
+        try:
+            code = process.wait()
+            if not (folder / "results.json").exists():
+                manifest = load(folder / "manifest.json", {})
+                report = {"id": folder.name, "label": manifest.get("label", "Запуск"),
+                          "endpoint": "Локальное окружение", "startedAt": manifest.get("startedAt"),
+                          "finishedAt": datetime.now(timezone.utc).isoformat(), "exitCode": code or 2,
+                          "cancelled": (folder / "cancel.requested").exists(),
+                          "tests": [], "coverageRuns": [], "infrastructureErrors": ["Runner завершился без отчёта. Подробности в panel.log."]}
+                save_json(folder / "results.json", report)
+                write_report(report, folder / "index.html")
+                update_history(folder, report)
+        finally:
+            log.close()
+
+    def cancel(self, id):
+        folder = self.folder(id)
+        if load(folder / "manifest.json", {}).get("status") != "starting":
+            raise HTTPException(409, "Запуск уже завершён")
+        (folder / "cancel.requested").touch()
+
+
+class StartRequest(BaseModel):
+    node_ids: list[str] = Field(min_length=1, max_length=2000)
+    label: str = Field(default="Запуск из панели", min_length=1, max_length=100)
+    include_live: bool = False
+    deployed_run_id: str | None = Field(default=None, max_length=100)
+
+
+class GitLabTriggerRequest(BaseModel):
+    project_id: str = Field(min_length=1, max_length=200)
+    token: str = Field(min_length=1, max_length=200)
+    ref: str = Field(default="main", min_length=1, max_length=100)
+    host: str = Field(default="https://gitlab.com", max_length=200)
+    github_sha: str | None = Field(default=None, pattern=r"^[a-f0-9]{40}$")
+    coverage_run_id: str | None = Field(default=None, max_length=80)
+    coverage_url: str | None = Field(default=None, max_length=200)
+    min_coverage: float = Field(default=80.0, ge=0.0, le=100.0)
+
+
+class GitLabGateRequest(BaseModel):
+    run_id: str = Field(min_length=1, max_length=80)
+    coverage_url: str | None = Field(default=None, max_length=200)
+    api_key: str | None = Field(default=None, max_length=200)
+    min_coverage: float = Field(default=80.0, ge=0.0, le=100.0)
+
+
+def create_app(manager=None):
+    manager = manager or Manager()
+    app = FastAPI(title="GraphQL Test Control")
+    app.state.manager = manager
+
+    @app.middleware("http")
+    async def local_commands(request: Request, call_next):
+        if request.method == "POST":
+            token = request.headers.get("X-Panel-Token", "")
+            if not hmac.compare_digest(token, manager.token):
+                from fastapi.responses import JSONResponse
+                return JSONResponse({"detail": "Перезагрузите панель: отсутствует токен управления"}, status_code=403)
+            origin = request.headers.get("Origin")
+            allowed_origins = {f"http://localhost:{request.url.port}", f"http://127.0.0.1:{request.url.port}"}
+            public_origin = os.environ.get("QA_PANEL_PUBLIC_ORIGIN", "").strip().rstrip("/")
+            if public_origin:
+                allowed_origins.add(public_origin)
+            if origin and origin not in allowed_origins:
+                from fastapi.responses import JSONResponse
+                return JSONResponse({"detail": "Команды разрешены только из локальной панели"}, status_code=403)
+        response = await call_next(request)
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/")
+    def index():
+        return FileResponse(WEB / "index.html")
+
+    @app.get("/api/state")
+    def state():
+        active = manager.active
+        if active:
+            try:
+                if load(manager.folder(active) / "manifest.json", {}).get("status") != "starting":
+                    active = None
+            except HTTPException:
+                active = None
+        return {"token": manager.token, "catalog": manager.catalog(), "active": active, "history": manager.history(),
+                "deployedAvailable": all(deployed_settings())}
+
+    @app.post("/api/runs")
+    def start(payload: StartRequest):
+        return {"id": manager.start(payload.node_ids, payload.label, payload.include_live, payload.deployed_run_id)}
+
+    @app.post("/api/catalog/refresh")
+    def refresh_catalog():
+        with manager.lock:
+            if manager.active:
+                try:
+                    if manager.snapshot(manager.active)["manifest"].get("status") == "starting":
+                        raise HTTPException(409, "Дождитесь завершения текущего запуска")
+                except HTTPException as exc:
+                    if exc.status_code == 404:
+                        manager.active = None
+                    else:
+                        raise
+            manager._catalog = None
+            try:
+                return {"catalog": manager.catalog()}
+            except RuntimeError as exc:
+                raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/runs/{id}")
+    def run(id: str):
+        return manager.snapshot(id)
+
+    @app.get("/api/runs/{id}/tests/{key}")
+    def evidence(id: str, key: str):
+        return manager.evidence(id, key)
+
+    @app.post("/api/runs/{id}/cancel")
+    def cancel(id: str):
+        manager.cancel(id)
+        return {"status": "cancel-requested"}
+
+    @app.post("/api/gitlab/trigger")
+    def gitlab_trigger(payload: GitLabTriggerRequest):
+        from coverage_qa.gitlab_ci import GitLabClient
+        client = GitLabClient(host=payload.host, token=payload.token)
+        variables = {}
+        if payload.github_sha:
+            variables["QA_GITHUB_SHA"] = payload.github_sha
+        if payload.coverage_run_id:
+            variables["COVERAGE_RUN_ID"] = payload.coverage_run_id
+        variables["COVERAGE_MIN_PERCENT"] = str(payload.min_coverage)
+        try:
+            pipeline = client.trigger_pipeline(
+                project_id=payload.project_id,
+                ref=payload.ref,
+                token=payload.token,
+                variables=variables,
+            )
+            return {"status": "triggered", "pipeline": pipeline}
+        except Exception as exc:
+            raise HTTPException(502, f"GitLab API error: {exc}") from exc
+
+    @app.get("/api/gitlab/pipelines/{project_id}/{pipeline_id}")
+    def gitlab_pipeline_status(project_id: str, pipeline_id: int, request: Request, host: str | None = None):
+        from coverage_qa.gitlab_ci import GitLabClient
+        token = request.headers.get("X-GitLab-Token")
+        if not token:
+            raise HTTPException(401, "GitLab access token required")
+        client = GitLabClient(host=host, token=token)
+        try:
+            return client.get_pipeline(project_id=project_id, pipeline_id=pipeline_id, token=token)
+        except Exception as exc:
+            raise HTTPException(502, f"GitLab status error: {exc}") from exc
+
+    @app.post("/api/gitlab/gate")
+    def gitlab_coverage_gate(payload: GitLabGateRequest):
+        from coverage_qa.gitlab_ci import CoverageQualityGate
+        url = payload.coverage_url or os.environ.get("COVERAGE_URL", "http://localhost:8000")
+        key = payload.api_key or ""
+        if not key and url.rstrip("/") == os.environ.get("COVERAGE_URL", "http://localhost:8000").rstrip("/"):
+            key = os.environ.get("COVERAGE_API_KEY", "")
+        gate = CoverageQualityGate(coverage_url=url, api_key=key)
+        try:
+            evaluation = gate.evaluate(payload.run_id, min_coverage=payload.min_coverage)
+            return evaluation.to_dict()
+        except Exception as exc:
+            raise HTTPException(502, f"Coverage Gate evaluation error: {exc}") from exc
+
+    app.mount("/assets", StaticFiles(directory=WEB), name="panel-assets")
+    app.mount("/reports", StaticFiles(directory=manager.reports, html=True), name="reports")
+    return app
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Local QA panel.')
+    parser.add_argument("--port", type=int, default=9020)
+    args = parser.parse_args()
+    import uvicorn
+    print(f"Test control: http://localhost:{args.port}/", flush=True)
+    uvicorn.run(create_app(), host="127.0.0.1", port=args.port)
+
+
+if __name__ == "__main__":
+    main()

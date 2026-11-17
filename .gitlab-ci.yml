@@ -1,0 +1,106 @@
+stages: [preflight, test, quality-gate]
+
+default:
+  tags: [coverage-qa-linux]
+  before_script:
+    - |
+      if [ -n "${QA_GITHUB_SHA:-}" ]; then
+        [[ "$QA_GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+        git fetch --depth=1 https://github.com/QualiMeter/GraphQL-Coverage-Proxy-QA.git "$QA_GITHUB_SHA"
+        git checkout --detach FETCH_HEAD
+        test "$(git rev-parse HEAD)" = "$QA_GITHUB_SHA"
+      fi
+
+variables:
+  FRONTEND_SHA: "1990e0de63bf742745fc20810f44135876e8eb16"
+  BACKEND_SHA: "41db524295e5cbf27a100bd417f62ddc896b30d6"
+  MVP_MIN_PERCENT: "66.67"
+  PLAYWRIGHT_BROWSERS_PATH: "$CI_PROJECT_DIR/.browsers"
+
+frontend-build:
+  stage: preflight
+  script:
+    - git init .ci/frontend
+    - git -C .ci/frontend fetch --depth=1 https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Frontend.git "$FRONTEND_SHA"
+    - git -C .ci/frontend checkout --detach FETCH_HEAD
+    - cd .ci/frontend
+    - npm ci
+    - npm run lint
+    - npm test
+    - npm run build
+  artifacts:
+    paths: [.ci/frontend/dist/]
+    expire_in: 1 day
+
+acceptance:
+  stage: test
+  needs: [frontend-build]
+  script:
+    - git init .ci/backend
+    - git -C .ci/backend fetch --depth=1 https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend.git "$BACKEND_SHA"
+    - git -C .ci/backend checkout --detach FETCH_HEAD
+    - export COVERAGE_BACKEND_DIR="$CI_PROJECT_DIR/.ci/backend"
+    - export QA_FRONTEND_DIST="$CI_PROJECT_DIR/.ci/frontend/dist"
+    - python3.12 -m venv .venv
+    - source .venv/bin/activate
+    - python -m pip install -r requirements.lock.txt -r acceptance/mvp/requirements.txt
+    - python -m pip install -e . --no-deps
+    - python -m playwright install chromium
+    - npm ci --prefix acceptance/mvp
+    - (cd acceptance/mvp && npx --no-install playwright install chromium)
+    - docker info >/dev/null
+    - python -m acceptance.mvp.run --export-graph reports/gate-input.json
+    - python -m coverage_qa test --suite all
+  artifacts:
+    when: always
+    expire_in: 7 days
+    reports:
+      junit: reports/runs/*/junit.xml
+    paths:
+      - reports/gate-input.json
+      - reports/runs/*/index.html
+      - reports/runs/*/tst07-*.png
+      - reports/runs/*/coverage.csv
+      - reports/runs/*/test-matrix.csv
+      - reports/mvp/*/index.html
+      - reports/mvp/*/coverage.csv
+      - reports/mvp/*/coverage.json
+      - reports/mvp/*/steps.json
+      - reports/mvp/*/html/
+
+graphql-coverage-gate:
+  stage: quality-gate
+  needs: [acceptance]
+  script:
+    - python3.12 -m venv .venv
+    - source .venv/bin/activate
+    - python -m pip install -r requirements.lock.txt
+    - python -m pip install -e . --no-deps
+    - >-
+      python -m coverage_qa gitlab gate --graph-file reports/gate-input.json
+      --min-coverage "$MVP_MIN_PERCENT" --junit-out reports/gate.xml
+      --csv-out reports/fields.csv --summary-out reports/summary.json
+  coverage: '/Total coverage:\s*([0-9.]+)%/'
+  artifacts:
+    when: always
+    expire_in: 30 days
+    reports:
+      junit: reports/gate.xml
+    paths: [reports/gate.xml, reports/fields.csv, reports/summary.json]
+
+
+external-run-gate:
+  extends: graphql-coverage-gate
+  needs: []
+  rules:
+    - if: '$COVERAGE_RUN_ID && $CI_COMMIT_REF_PROTECTED == "true"'
+  script:
+    - python3.12 -m venv .venv
+    - source .venv/bin/activate
+    - python -m pip install -r requirements.lock.txt
+    - python -m pip install -e . --no-deps
+    - >-
+      python -m coverage_qa gitlab gate --run-id "$COVERAGE_RUN_ID"
+      --coverage-url "${COVERAGE_URL:?Set COVERAGE_URL for the external run}"
+      --min-coverage "${COVERAGE_MIN_PERCENT:-80}" --junit-out reports/gate.xml
+      --csv-out reports/fields.csv --summary-out reports/summary.json

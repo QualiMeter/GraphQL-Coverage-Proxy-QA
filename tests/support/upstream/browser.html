@@ -1,0 +1,3 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><title>Тестовый сценарий GraphQL</title>
+<h1>Получение пользователя</h1><button id="load">Получить пользователя</button><pre id="result" role="status">Запрос ещё не отправлен</pre>
+<script>document.querySelector('#load').onclick=async()=>{try{const r=await fetch('/exchange',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:'query BrowserUser { user(id: "1") { id name } }',operationName:'BrowserUser'})});const b=await r.json();document.querySelector('#result').textContent=JSON.stringify(b,null,2)}catch(e){document.querySelector('#result').textContent=e.message}};</script></html>

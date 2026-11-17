@@ -1,0 +1,17 @@
+stages: [quality-gate]
+
+verify-external-run:
+  stage: quality-gate
+  image: python:3.12
+  script:
+    - python -m pip install "git+https://github.com/QualiMeter/GraphQL-Coverage-Proxy-QA.git@${QA_REVISION:?Set a QA commit SHA}"
+    - >-
+      coverage-qa gitlab gate --run-id "${COVERAGE_RUN_ID:?Set an existing run UUID}"
+      --coverage-url "${COVERAGE_URL:?Set proxy URL}" --min-coverage "${COVERAGE_MIN_PERCENT:-80}"
+      --junit-out reports/gate.xml --csv-out reports/fields.csv
+  coverage: '/Total coverage:\s*([0-9.]+)%/'
+  artifacts:
+    when: always
+    reports:
+      junit: reports/gate.xml
+    paths: [reports/fields.csv]

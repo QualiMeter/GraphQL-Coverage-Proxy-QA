@@ -1,0 +1,37 @@
+type Query {
+  me: User!
+  products(limit: Int = 10, offset: Int = 0): [Product!]!
+  product(id: ID!): Product
+  orders(status: OrderStatus): [Order!]!
+  order(id: ID!): Order
+  adminStats: ShopStats
+}
+type Mutation {
+  login(email: String!, password: String!): AuthPayload!
+  updateProfile(name: String!): User!
+  createOrder(input: CreateOrderInput!): Order!
+  cancelOrder(id: ID!): Order!
+}
+type AuthPayload { token: String! user: User! }
+type User { id: ID! name: String! email: String! role: Role! orders: [Order!]! }
+type Product { id: ID! name: String! priceCents: Int! stock: Int! }
+type Order {
+  id: ID!
+  customer: User!
+  status: OrderStatus!
+  items: [OrderItem!]!
+  totalCents: Int!
+  createdAt: String!
+}
+type OrderItem {
+  product: Product!
+  name: String!
+  quantity: Int!
+  unitPriceCents: Int!
+  totalCents: Int!
+}
+type ShopStats { customers: Int! activeOrders: Int! revenueCents: Int! }
+enum Role { CUSTOMER ADMIN }
+enum OrderStatus { CREATED CANCELLED }
+input OrderLineInput { productId: ID! quantity: Int! }
+input CreateOrderInput { items: [OrderLineInput!]! idempotencyKey: String! }

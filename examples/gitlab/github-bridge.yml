@@ -1,0 +1,24 @@
+stages: [source, qa]
+workflow:
+  rules:
+    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $QA_GITHUB_SHA =~ /^[a-f0-9]{40}$/'
+
+load-qa-config:
+  stage: source
+  tags: [coverage-qa-linux]
+  script:
+    - git fetch https://github.com/QualiMeter/GraphQL-Coverage-Proxy-QA.git refs/heads/main:refs/remotes/qa/main refs/heads/feat/qa-platform-and-demo-shop:refs/remotes/qa/platform
+    - git merge-base --is-ancestor "$QA_GITHUB_SHA" refs/remotes/qa/platform || git merge-base --is-ancestor "$QA_GITHUB_SHA" refs/remotes/qa/main
+    - git show "$QA_GITHUB_SHA":.gitlab-ci.yml > qa-pipeline.yml
+  artifacts:
+    paths: [qa-pipeline.yml]
+
+run-qa:
+  stage: qa
+  trigger:
+    include:
+      - artifact: qa-pipeline.yml
+        job: load-qa-config
+    strategy: depend
+    forward:
+      pipeline_variables: true
