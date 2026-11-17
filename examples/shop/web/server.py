@@ -18,6 +18,7 @@ async def lifespan(app):
     app.state.target = os.environ.get("SHOP_GRAPHQL_URL", "http://127.0.0.1:9100/graphql")
     app.state.coverage_key = os.environ.get("SHOP_COVERAGE_API_KEY")
     app.state.run_id = os.environ.get("SHOP_COVERAGE_RUN_ID")
+    app.state.test_execution_id = os.environ.get("SHOP_COVERAGE_TEST_EXECUTION_ID")
     yield
     await app.state.client.aclose()
 
@@ -54,6 +55,8 @@ async def graphql_proxy(request: Request):
         headers["X-Coverage-Api-Key"] = request.app.state.coverage_key
     if request.app.state.run_id:
         headers["X-Coverage-Run-Id"] = request.app.state.run_id
+    if request.app.state.test_execution_id:
+        headers["X-Coverage-Test-Execution-Id"] = request.app.state.test_execution_id
     if request.headers.get("authorization"):
         headers["Authorization"] = request.headers["authorization"]
     try:

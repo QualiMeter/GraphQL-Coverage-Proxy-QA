@@ -5,9 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       backend_ref:
-        description: Coverage backend ref to test
-        default: main
-        required: true
+        description: Backend ref override; Test Coverage branch is paired automatically
+        default: ''
+        required: false
       frontend_ref:
         description: Coverage frontend ref to test
         default: main
@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
+      QA_BACKEND_REF: ${{ inputs.backend_ref || (((github.head_ref || github.ref_name) == 'feat/test-coverage') && 'feat/test-coverage' || 'main') }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/api-tests/.browsers
       QA_FRONTEND_DIST: ${{ github.workspace }}/coverage-frontend/dist
     steps:
@@ -36,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: QualiMeter/GraphQL-Coverage-Proxy-Beckend
-          ref: ${{ inputs.backend_ref || 'main' }}
+          ref: ${{ env.QA_BACKEND_REF }}
           path: coverage-backend
           token: ${{ secrets.COVERAGE_BACKEND_TOKEN || github.token }}
           persist-credentials: false
@@ -73,11 +74,6 @@ jobs:
         working-directory: api-tests
       - run: python -m playwright install --with-deps chromium
         working-directory: api-tests
-      - run: python -m coverage_qa test --coverage-backend-dir ../coverage-backend
-        working-directory: api-tests
-      - name: Backend unit tests for analysis, schema parsing and document storage
-        working-directory: coverage-backend
-        run: python -m pytest -q tests/test_query_analyzer.py tests/test_schema_parser.py tests/test_safe_document.py
       - name: Install MVP acceptance dependencies
         working-directory: api-tests
         run: |
@@ -85,6 +81,11 @@ jobs:
           npm ci --prefix acceptance/mvp
           cd acceptance/mvp
           npx --no-install playwright install --with-deps chromium
+      - run: python -m coverage_qa test --coverage-backend-dir ../coverage-backend
+        working-directory: api-tests
+      - name: Backend unit tests for analysis, schema parsing and document storage
+        working-directory: coverage-backend
+        run: python -m pytest -q tests/test_query_analyzer.py tests/test_schema_parser.py tests/test_safe_document.py
       - name: Verify nine-field MVP and persistence
         working-directory: api-tests
         run: |

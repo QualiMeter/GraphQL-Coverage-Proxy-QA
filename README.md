@@ -4,6 +4,8 @@
 
 **Для приёмки по ТЗ** — [запуск сценария на девяти полях, отчёт и демонстрация](docs/mvp-acceptance.md).
 
+**Test Coverage** — [результаты pytest/Playwright, поля каждого теста, интерфейс и подключение своего runner](docs/test-coverage.md).
+
 QA-проект команды QualiMeter: тесты API, проверка учёта полей GraphQL, браузерные сценарии и панель управления запусками.
 
 Рабочие точки входа этого репозитория — `coverage-qa panel`, `coverage-qa test` и отдельный сценарий `python -m acceptance.mvp.run`. Папка `api-tests` со скриптами `panel.ps1` и `run.ps1` в исходном Windows-workspace содержит самостоятельную старую реализацию. Эти скрипты запускают соседние Python-файлы. Для воспроизведения результата из конкретного коммита используйте окружение и команды этого checkout.
@@ -25,7 +27,7 @@ QA-проект команды QualiMeter: тесты API, проверка уч
 
 ### 1. Подготовьте окружение
 
-Нужны **Git, Python 3.12+ и Docker с Compose v2**. На Windows используйте Docker Desktop с Linux engine; на Linux — Docker Engine и Compose plugin. Перед тестами запустите Docker.
+Нужны **Git, Python 3.12+, Node.js 22 и Docker с Compose v2**. На Windows используйте Docker Desktop с Linux engine; на Linux — Docker Engine и Compose plugin. Перед тестами запустите Docker.
 
 Проверьте инструменты:
 
@@ -40,8 +42,8 @@ docker compose version
 Выполните обе команды из одной рабочей папки:
 
 ```sh
-git clone https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend.git
-git clone --branch feat/qa-platform-and-demo-shop https://github.com/QualiMeter/GraphQL-Coverage-Proxy-QA.git
+git clone --branch feat/test-coverage https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend.git
+git clone --branch feat/test-coverage https://github.com/QualiMeter/GraphQL-Coverage-Proxy-QA.git
 cd GraphQL-Coverage-Proxy-QA
 ```
 
@@ -65,6 +67,7 @@ Backend нужен как исходный код: runner сам запусти�
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.lock.txt
 .\.venv\Scripts\python -m pip install -e . --no-deps
+npm ci --prefix acceptance/mvp
 $env:PLAYWRIGHT_BROWSERS_PATH = "$PWD/.browsers"
 .\.venv\Scripts\python -m playwright install chromium
 ```
@@ -75,6 +78,7 @@ $env:PLAYWRIGHT_BROWSERS_PATH = "$PWD/.browsers"
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock.txt
 .venv/bin/python -m pip install -e . --no-deps
+npm ci --prefix acceptance/mvp
 PLAYWRIGHT_BROWSERS_PATH="$PWD/.browsers" .venv/bin/python -m playwright install --with-deps chromium
 ```
 
@@ -253,7 +257,7 @@ Linux/macOS: `export COVERAGE_BACKEND_DIR=/path/to/backend`.
 
 ### CSV и сравнение
 
-В каталоге управляемого запуска `coverage.csv` показывает hits и процент из последней контрольной точки сервера. Пустой процент означает отсутствие измерения. В `test-matrix.csv` каждая фаза и вспомогательный сервис имеют отдельный runId и общий pytest nodeId родительского сценария. При экспорте старых данных владелец восстанавливается по событиям покрытия с тем же runId. Если связь неоднозначна или отсутствует, строка сохраняется с пустым test_id. В сравнении прогонов статус `decrease` означает снижение положительного счётчика, а `dropped` — его падение до нуля.
+В каталоге управляемого запуска `coverage.csv` показывает hits и процент из последней контрольной точки сервера. Пустой процент означает отсутствие измерения. Новая `test-matrix.csv` использует серверные попытки: executionId, testId, framework, attempt, окончательный status, длительность, поля, hits и evidence. Исходные ответы сохраняются в `server-test-coverage.json` и видны во вкладке Test Coverage панели. Для старых отчётов без серверных попыток сохраняется прежний формат матрицы с runId и pytest nodeId; неоднозначная связь остаётся пустой. В сравнении прогонов статус `decrease` означает снижение положительного счётчика, а `dropped` — его падение до нуля.
 
 В каталоге приёмки MVP другой формат `coverage.csv`: строки соответствуют девяти полям, столбцы показывают hits после каждого действия. Для сравнения двух запусков одной схемы выполните в активированном окружении:
 

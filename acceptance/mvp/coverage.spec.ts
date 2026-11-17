@@ -1,9 +1,12 @@
-import { test, expect } from '@playwright/test';
+import { test as base, expect } from '@playwright/test';
+import { createCoverageTest } from '../../integrations/playwright/index.cjs';
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-test('MVP · девять полей, реальные запросы и точные счётчики', async ({ request }, info) => {
+const test = createCoverageTest(base);
+
+test('MVP · девять полей, реальные запросы и точные счётчики', async ({ request, coverage }, info) => {
   const proxy = process.env.MVP_PROXY!;
   const endpoint = process.env.MVP_UPSTREAM + '/graphql';
   const headers = { 'X-Coverage-Api-Key': process.env.MVP_KEY! };
@@ -15,10 +18,11 @@ test('MVP · девять полей, реальные запросы и точ�
   const service = await create('/api/services', { key: 'mvp-' + randomUUID(), name: 'MVP', endpointUrl: endpoint });
   const schema = await create('/api/schemas/import/introspection', { serviceId: service.id });
   const run = await create('/api/runs', { snapshotId: schema.id, name: 'MVP acceptance' });
+  const execution = await coverage.trackRun(run.id);
   const runPath = proxy + '/api/runs/' + run.id;
   const query = '{ user(id:"1") { id name orders { total } } }';
   async function send(query: string) {
-    return request.post(proxy + '/graphql', { headers: { ...headers, 'X-Coverage-Run-Id': run.id }, data: { query } });
+    return request.post(proxy + '/graphql', { headers: { ...headers, ...execution.headers }, data: { query } });
   }
   const checkpoints: { label: string, percent: number, hits: Record<string, number> }[] = [];
   async function checkpoint(label: string, covered: number, percent: number, hits: number[]) {

@@ -6,5 +6,6 @@ if (!folder) throw new Error('Start with python -m acceptance.mvp.run');
 export default defineConfig({
   workers: 1,
   outputDir: join(folder, 'results'),
-  reporter: [['list'], ['html', { outputFolder: join(folder, 'html'), open: 'never' }]],
+  reporter: [['list'], ['html', { outputFolder: join(folder, 'html'), open: 'never' }],
+             [join(__dirname, '../../integrations/playwright/index.cjs')]],
 });

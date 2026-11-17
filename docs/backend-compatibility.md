@@ -1,20 +1,20 @@
 # Сверка backend, frontend и QA
 
-Дата сверки: 17 ноября 2026 года. Версии ниже соответствуют проверенным локальным checkout.
+Дата сверки: 18 ноября 2026 года. Версии ниже соответствуют проверенным локальным checkout.
 
 | Часть | Проверенная версия | Способ проверки |
 | --- | --- | --- |
-| Backend | `41db524295e5cbf27a100bd417f62ddc896b30d6` | Исходники, контракты и настоящие HTTP-запросы к процессу с временной PostgreSQL |
+| Backend | `f0a76149cfb758f34fa710a894e75ed3521260d1` | Исходники, контракты и настоящие HTTP-запросы к процессу с временной PostgreSQL |
 | Frontend | `1990e0de63bf742745fc20810f44135876e8eb16` | TST-07: реальная production-сборка, выбор созданного сервиса и прогона, сверка графа, таблицы, метрик и hits с REST |
 | QA | Эта feature-ветка | Локальный all и GitHub Actions; конкретный backend commit сохраняется в результатах каждого управляемого прогона |
 
 ## Контракты, по которым сверяемся
 
-- [Backend API](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/41db524295e5cbf27a100bd417f62ddc896b30d6/docs/frontend-api.md).
-- [Cookie/roles/CSRF](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/41db524295e5cbf27a100bd417f62ddc896b30d6/docs/frontend-auth.md).
-- [Multi-service routing](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/41db524295e5cbf27a100bd417f62ddc896b30d6/docs/frontend-multi-service.md).
-- [Журнал и история](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/41db524295e5cbf27a100bd417f62ddc896b30d6/docs/frontend-history-requests.md).
-- [Актуальное дополнение: P95, AST и метаданные схемы](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/41db524295e5cbf27a100bd417f62ddc896b30d6/docs/frontend-final-features.md).
+- [Backend API](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/f0a76149cfb758f34fa710a894e75ed3521260d1/docs/frontend-api.md).
+- [Cookie/roles/CSRF](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/f0a76149cfb758f34fa710a894e75ed3521260d1/docs/frontend-auth.md).
+- [Multi-service routing](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/f0a76149cfb758f34fa710a894e75ed3521260d1/docs/frontend-multi-service.md).
+- [Журнал и история](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/f0a76149cfb758f34fa710a894e75ed3521260d1/docs/frontend-history-requests.md).
+- [Актуальное дополнение: P95, AST и метаданные схемы](https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend/blob/f0a76149cfb758f34fa710a894e75ed3521260d1/docs/frontend-final-features.md).
 
 Документы разных этапов нужно читать вместе: например, отсутствие safeGraphqlDocument в описании этапа 4 отменено дополнением этапа 5. QA использует актуальные DTO, а не старый текст Swagger description одного маршрута.
 
@@ -78,4 +78,4 @@ Source identity фиксируется в `results.json`, `manifest.json` и HTM
 
 ## Версии компонентов в CI
 
-GitHub Actions по умолчанию проверяет актуальные main командных репозиториев. Параметры backend_ref/frontend_ref позволяют воспроизвести конкретный SHA. Фактические QA/backend/frontend SHA записываются в reports/component-revisions.json и лог шага Record component revisions. Корневой GitLab CI закреплён на backend 41db524295e5cbf27a100bd417f62ddc896b30d6 и frontend 1990e0de63bf742745fc20810f44135876e8eb16; эти значения обновляются вместе с контрактными тестами.
+GitHub Actions выбирает backend feat/test-coverage для одноимённой QA-ветки и main для остальных веток. Frontend по умолчанию берётся из main. Параметры backend_ref/frontend_ref позволяют воспроизвести конкретный SHA. Фактические QA/backend/frontend SHA записываются в reports/component-revisions.json и лог шага Record component revisions. Корневой GitLab CI закреплён на backend f0a76149cfb758f34fa710a894e75ed3521260d1 и frontend 1990e0de63bf742745fc20810f44135876e8eb16; эти значения обновляются вместе с контрактными тестами.

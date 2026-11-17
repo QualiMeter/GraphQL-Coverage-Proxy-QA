@@ -33,6 +33,16 @@ def main():
             response.raise_for_status()
             if response.json() != saved:
                 raise AssertionError("Coverage changed after backend restart")
+            tests = client.get(f"/api/runs/{saved['runId']}/tests")
+            tests.raise_for_status()
+            executions = tests.json()
+            if (len(executions) != 1 or executions[0]["framework"] != "playwright"
+                    or executions[0]["status"] != "passed" or executions[0]["requestCount"] != 5
+                    or executions[0]["countedRequestCount"] != 3 or executions[0]["coveredFieldCount"] != 6):
+                raise AssertionError("Playwright result or request-to-test attribution was not persisted")
+            fields = client.get(f"/api/runs/{saved['runId']}/tests/{executions[0]['id']}/fields")
+            fields.raise_for_status()
+            (folder / "test-coverage.json").write_text(json.dumps({"executions": executions, "fields": fields.json()}, indent=2), encoding="utf-8")
         write_summary(folder, saved)
         if args.export_graph:
             args.export_graph.parent.mkdir(parents=True, exist_ok=True)

@@ -13,7 +13,7 @@ default:
 
 variables:
   FRONTEND_SHA: "1990e0de63bf742745fc20810f44135876e8eb16"
-  BACKEND_SHA: "41db524295e5cbf27a100bd417f62ddc896b30d6"
+  BACKEND_SHA: "f0a76149cfb758f34fa710a894e75ed3521260d1"
   MVP_MIN_PERCENT: "66.67"
   PLAYWRIGHT_BROWSERS_PATH: "$CI_PROJECT_DIR/.browsers"
 
@@ -62,10 +62,14 @@ acceptance:
       - reports/runs/*/tst07-*.png
       - reports/runs/*/coverage.csv
       - reports/runs/*/test-matrix.csv
+      - reports/runs/*/server-test-coverage.json
+      - reports/runs/*/results.json
+      - reports/runs/*/test-coverage-native.png
       - reports/mvp/*/index.html
       - reports/mvp/*/coverage.csv
       - reports/mvp/*/coverage.json
       - reports/mvp/*/steps.json
+      - reports/mvp/*/test-coverage.json
       - reports/mvp/*/html/
 
 graphql-coverage-gate:
