@@ -75,6 +75,15 @@ def pytest_collection_modifyitems(config, items):
         discarded = [item for item in items if item.nodeid not in chosen]
         items[:] = kept
         config.hook.pytest_deselected(items=discarded)
+    if config.getoption("--deployed-run-id") and not config.option.collectonly:
+        from fastapi import HTTPException
+        from coverage_qa.deployed import validate_deployed_scenarios, validate_deployed_target
+        try:
+            validate_deployed_scenarios([item.nodeid for item in items])
+            validate_deployed_target(config.getoption("--deployed-run-id"),
+                                     config.getoption("--coverage-url"), config.getoption("--upstream-url"))
+        except HTTPException as exc:
+            raise pytest.UsageError(str(exc.detail)) from None
     config.api_report["plannedTests"] = [describe(item) for item in items]
 
 

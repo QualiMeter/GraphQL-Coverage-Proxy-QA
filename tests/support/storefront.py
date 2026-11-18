@@ -20,6 +20,7 @@ from coverage_qa.reporting.progress import emit, evidence_id
 @pytest.fixture
 def storefront(request):
     deployed_run_id = request.config.getoption("--deployed-run-id")
+    working_deployed = bool(deployed_run_id)
     if deployed_run_id:
         business_stack = SimpleNamespace(
             proxy=SimpleNamespace(base=request.config.getoption("--coverage-url").rstrip("/")),
@@ -28,6 +29,7 @@ def storefront(request):
         )
     else:
         business_stack = request.getfixturevalue("business_stack")
+        deployed_run_id = getattr(business_stack, "shared_run_id", None)
     entry = ensure_entry(request)
     api = API(business_stack.proxy.base + "/graphql", entry, business_stack.key)
     run = CoverageRun(api, business_stack, request.config.api_report, total_fields=35)
@@ -66,8 +68,9 @@ def storefront(request):
             run.prepare(request.node.nodeid)
         if run.execution is None:
             run.execution = begin_current_test(run.base, run.run_id, api.key)
-        token = direct('mutation($password:String!){login(email:"alice@example.test",password:$password){token}}',
-                       {"password": "test-password-2026"})["login"]["token"]
+        if not working_deployed:
+            token = direct('mutation($password:String!){login(email:"alice@example.test",password:$password){token}}',
+                           {"password": "test-password-2026"})["login"]["token"]
         server = Server("examples.shop.web.server:app", ROOT, request.config.run_folder / (slug + ".log"), {
             "SHOP_GRAPHQL_URL": business_stack.proxy.base + "/graphql",
             "SHOP_COVERAGE_API_KEY": business_stack.key, "SHOP_COVERAGE_RUN_ID": run.run_id,

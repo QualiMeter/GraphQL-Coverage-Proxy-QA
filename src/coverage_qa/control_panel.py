@@ -8,9 +8,7 @@ import secrets
 import subprocess
 import sys
 import threading
-from uuid import UUID
 
-import httpx
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,51 +26,7 @@ from coverage_qa.environment import ROOT
 
 WEB = Path(__file__).resolve().parent / "web"
 RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
-DEPLOYED_SERVICE_KEY = "forma-demo-shop"
-
-
-def deployed_settings():
-    url = os.environ.get("QA_DEPLOYED_COVERAGE_URL", "").strip().rstrip("/")
-    shop = os.environ.get("QA_DEPLOYED_SHOP_API_URL", "").strip().rstrip("/")
-    key = os.environ.get("COVERAGE_API_KEY", "").strip()
-    return url, shop, key
-
-
-def validate_deployed_run(run_id):
-    try:
-        parsed_id = str(UUID(run_id))
-    except (ValueError, TypeError, AttributeError):
-        raise HTTPException(400, "Введите корректный UUID прогона из Coverage")
-    if parsed_id != run_id.lower():
-        raise HTTPException(400, "Введите UUID прогона без дополнительных символов")
-    url, shop, key = deployed_settings()
-    if not (url and shop and key):
-        raise HTTPException(503, "Режим FORMA не настроен: добавьте адреса и ключ в защищённый файл VPS")
-    try:
-        with httpx.Client(timeout=8.0, trust_env=False) as client:
-            services_response = client.get(url + "/api/services", headers={"X-Coverage-Api-Key": key})
-            services_response.raise_for_status()
-            service = next((row for row in services_response.json()
-                            if row.get("key") == DEPLOYED_SERVICE_KEY), None)
-            if not service:
-                raise HTTPException(409, "Сервис FORMA Demo Shop отсутствует в Coverage")
-            runs_response = client.get(url + "/api/runs",
-                                       params={"serviceId": service["id"], "status": "running"},
-                                       headers={"X-Coverage-Api-Key": key})
-            runs_response.raise_for_status()
-            if not any(row.get("id", "").lower() == parsed_id for row in runs_response.json()):
-                raise HTTPException(409, "Выбранный прогон FORMA не активен или принадлежит другому сервису")
-            shop_response = client.post(shop + "/graphql",
-                                        json={"query": "{ __typename }"})
-            shop_response.raise_for_status()
-            if shop_response.json().get("errors"):
-                raise HTTPException(503, "Demo Shop API не отвечает корректно")
-    except httpx.HTTPError:
-        raise HTTPException(503, "Не удалось проверить Coverage или Demo Shop; проверьте адреса и доступ")
-    except (ValueError, KeyError, TypeError):
-        raise HTTPException(503, "Coverage вернул неожиданный ответ")
-    return parsed_id, url, shop
-
+from coverage_qa.deployed import deployed_settings, validate_deployed_run, validate_deployed_scenarios, SAFE_DEPLOYED_SCENARIOS
 
 
 def load(path, default=None):
@@ -173,6 +127,7 @@ class Manager:
         if any(catalog[x]["group"] == "live" for x in selected) and not include_live:
             raise HTTPException(400, "Для публичного сервера включите GET-only проверки")
         if deployed_run_id is not None:
+            validate_deployed_scenarios(selected)
             if include_live or any(catalog[x]["group"] != "e2e" for x in selected):
                 raise HTTPException(400, "В рабочем режиме FORMA разрешены только браузерные E2E-сценарии")
             deployed_run_id, deployed_url, deployed_shop = validate_deployed_run(deployed_run_id)
@@ -281,7 +236,7 @@ def create_app(manager=None):
             except HTTPException:
                 active = None
         return {"token": manager.token, "catalog": manager.catalog(), "active": active, "history": manager.history(),
-                "deployedAvailable": all(deployed_settings())}
+                "deployedAvailable": all(deployed_settings()), "safeDeployedScenarioIds": sorted(SAFE_DEPLOYED_SCENARIOS)}
 
     @app.post("/api/runs")
     def start(payload: StartRequest):

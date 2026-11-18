@@ -12,7 +12,7 @@ def test_deployed_mode_requires_server_side_key(tmp_path, monkeypatch):
     for key in ("QA_DEPLOYED_COVERAGE_URL", "QA_DEPLOYED_SHOP_API_URL", "COVERAGE_API_KEY"):
         monkeypatch.delenv(key, raising=False)
     manager = Manager(tmp_path / "reports")
-    manager._catalog = [{"id": "tests/e2e/test_shop.py::test_one", "group": "e2e"}]
+    manager._catalog = [{"id": "tests/e2e/test_shop.py::test_storefront_catalog_and_cart", "group": "e2e"}]
     with TestClient(create_app(manager)) as client:
         state = client.get("/api/state").json()
         assert state["deployedAvailable"] is False

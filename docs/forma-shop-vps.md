@@ -120,3 +120,24 @@ Nginx rate limiting для `/shop/api/graphql` до публичного зап�
 по `127.0.0.1:9110`. Чтобы вернуть прямые локальные вызовы API, запускайте
 Compose без секретного env-файла (или с `SHOP_GRAPHQL_URL=http://api:9100/graphql`
 и пустыми `SHOP_COVERAGE_*`). Данные PostgreSQL сохраняются, пока не удалён volume.
+
+
+## Ограничения deployed FORMA после Sol review
+
+В рабочем режиме разрешён только явно проверенный сценарий
+`tests/e2e/test_shop.py::test_storefront_catalog_and_cart`. Он читает каталог,
+проверяет поиск и локальную корзину; fixture не выполняет login mutation.
+Allowlist находится в `coverage_qa.deployed` и применяется сервером панели и
+pytest после обработки путей, node IDs и selection.json. Произвольные E2E IDs,
+параметризованные варианты и смешанные наборы отклоняются.
+
+Панель и CLI используют одну проверку: корректный UUID, активный run сервиса
+`forma-demo-shop`, адреса из QA_DEPLOYED_COVERAGE_URL / QA_DEPLOYED_SHOP_API_URL
+и серверный COVERAGE_API_KEY. CLI targets должны совпадать с этой конфигурацией.
+Повторные запуски и pytest retries получают разные серверные attempts, сохраняя
+стабильный UUID при повторной передаче одной регистрации. Каждый запуск панели
+по-прежнему имеет отдельный каталог отчёта.
+
+Checkout, cancel, изменение остатков и имитация потерянного ответа mutation
+остаются доступны только в изолированном режиме с fixture-owned commerce DB и
+очисткой собственных заказов. Не добавляйте их в deployed allowlist.

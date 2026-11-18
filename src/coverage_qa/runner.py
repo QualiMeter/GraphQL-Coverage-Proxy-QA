@@ -70,6 +70,13 @@ def main():
         parser.error("--coverage-url requires --upstream-url")
     if args.deployed_run_id and (args.suite != "e2e" or not args.coverage_url or not os.environ.get("COVERAGE_API_KEY")):
         parser.error("--deployed-run-id requires --suite e2e, --coverage-url and COVERAGE_API_KEY")
+    if args.deployed_run_id:
+        from fastapi import HTTPException
+        from coverage_qa.deployed import validate_deployed_target
+        try:
+            validate_deployed_target(args.deployed_run_id, args.coverage_url, args.upstream_url)
+        except HTTPException as exc:
+            parser.error(str(exc.detail))
     paths, extra = select_paths(extra, parser, args.suite, bool(args.live_base_url))
     if "--collect-only" in extra or "--co" in extra:
         return subprocess.call([sys.executable, "-m", "pytest", "-c", str(ROOT / "pyproject.toml"),
