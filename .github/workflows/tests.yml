@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       backend_ref:
-        description: Backend ref override; Test Coverage branch is paired automatically
+        description: Backend ref override (defaults to main with Test Coverage API)
         default: ''
         required: false
       frontend_ref:
@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      QA_BACKEND_REF: ${{ inputs.backend_ref || (((github.head_ref || github.ref_name) == 'feat/test-coverage') && 'feat/test-coverage' || 'main') }}
+      QA_BACKEND_REF: ${{ inputs.backend_ref || 'main' }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/api-tests/.browsers
       QA_FRONTEND_DIST: ${{ github.workspace }}/coverage-frontend/dist
     steps:
@@ -81,6 +81,9 @@ jobs:
           npm ci --prefix acceptance/mvp
           cd acceptance/mvp
           npx --no-install playwright install --with-deps chromium
+      - name: Verify Playwright runner metadata and redirect safety
+        working-directory: api-tests
+        run: node --test integrations/playwright/index.test.cjs
       - run: python -m coverage_qa test --coverage-backend-dir ../coverage-backend
         working-directory: api-tests
       - name: Backend unit tests for analysis, schema parsing and document storage

@@ -129,10 +129,7 @@ const {createCoverageTest} = require(SDK);
 const test = createCoverageTest(base);
 async function user(request, coverage) {
   const execution = await coverage.trackRun(process.env.COVERAGE_TEST_RUN_ID);
-  const response = await request.post(process.env.COVERAGE_URL + '/graphql', {
-    headers: {...execution.headers, 'X-Coverage-Api-Key': process.env.COVERAGE_API_KEY},
-    data: {query: '{ user(id: "1") { id name } }'},
-  });
+  const response = await execution.post(request, {query: '{ user(id: "1") { id name } }'});
   expect(response.status()).toBe(200);
   return (await response.json()).data.user;
 }

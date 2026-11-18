@@ -42,7 +42,7 @@ docker compose version
 Выполните обе команды из одной рабочей папки:
 
 ```sh
-git clone --branch feat/test-coverage https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend.git
+git clone --branch main https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend.git
 git clone --branch feat/test-coverage https://github.com/QualiMeter/GraphQL-Coverage-Proxy-QA.git
 cd GraphQL-Coverage-Proxy-QA
 ```

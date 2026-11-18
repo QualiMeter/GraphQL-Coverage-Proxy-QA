@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+from types import SimpleNamespace
 from uuid import uuid4
 
 import httpx
@@ -64,6 +65,100 @@ def test_sdk_rejects_non_json_metadata_responses(monkeypatch, status, message):
     with pytest.raises(CoverageTrackingError, match=message):
         execution.start()
     assert not execution.started
+
+
+@pytest.mark.parametrize("status,code", [("passed", None), ("failed", "assertion_failed"),
+                                        ("failed", "teardown_failed"), ("interrupted", "runner_interrupted")])
+def test_finish_retries_busy_with_the_original_result(monkeypatch, status, code):
+    execution = Execution("http://coverage.test", uuid4(), "private-key", "test", "Test")
+    execution.started = True
+    bodies = []
+
+    def handle(request):
+        bodies.append(json.loads(request.content))
+        if len(bodies) == 1:
+            return httpx.Response(409, json={"detail": {"code": "test_requests_in_flight"}})
+        return httpx.Response(200, json={"id": execution.id, "runId": execution.run_id, "status": status})
+
+    transport(monkeypatch, handle)
+    monkeypatch.setattr(execution, "read", lambda: None)
+    monkeypatch.setattr(tracking.time, "sleep", lambda _: None)
+    execution.finish(status, 123, code)
+    assert execution.finished
+    assert bodies == [{"status": status, "durationMs": 123, "failureCode": code}] * 2
+
+
+def test_busy_cleanup_preserves_the_original_failure_and_saves_snapshot(monkeypatch):
+    from coverage_qa.pytest_plugin import publish, pytest_sessionfinish
+
+    execution = Execution("http://coverage.test", uuid4(), "private-key", "test", "Test")
+    execution.started = True
+    bodies = []
+    busy = True
+
+    def handle(request):
+        bodies.append(json.loads(request.content))
+        if busy:
+            return httpx.Response(409, json={"detail": {"code": "test_requests_in_flight"}})
+        return httpx.Response(200, json={"id": execution.id, "runId": execution.run_id, "status": "failed"})
+
+    transport(monkeypatch, handle)
+    monkeypatch.setattr(tracking.time, "sleep", lambda _: None)
+    monkeypatch.setattr(execution, "read", lambda: {"execution": {"id": execution.id}})
+    entry = {}
+    context = SimpleNamespace(executions={1: execution}, reports=[SimpleNamespace(duration=.123)],
+                              item=SimpleNamespace(api_entry=entry))
+    with pytest.raises(CoverageTrackingError, match="in flight"):
+        publish(context, "failed", "teardown_failed")
+    assert len(bodies) == 3
+    busy = False
+    session = SimpleNamespace(config=SimpleNamespace(_coverage_test_contexts=[context]), exitstatus=0)
+    pytest_sessionfinish(session, 0)
+    assert execution.finished
+    assert len(entry["serverTestCoverage"]) == 1
+    assert all(body == {"status": "failed", "durationMs": 123, "failureCode": "teardown_failed"} for body in bodies)
+
+
+def test_finish_rejects_unrelated_conflicts_without_retry(monkeypatch):
+    execution = Execution("http://coverage.test", uuid4(), "private-key", "test", "Test")
+    execution.started = True
+    calls = []
+    transport(monkeypatch, lambda request: (calls.append(request) or httpx.Response(409, json={"detail": "different result"})))
+    with pytest.raises(CoverageTrackingError, match="HTTP 409"):
+        execution.finish("passed", 10)
+    assert len(calls) == 1
+
+
+def test_finish_busy_retry_has_a_deadline(monkeypatch):
+    execution = Execution("http://coverage.test", uuid4(), "private-key", "test", "Test")
+    execution.started = True
+    clock, calls = [0.0], []
+    monkeypatch.setattr(tracking.time, "monotonic", lambda: clock[0])
+
+    def handle(request):
+        calls.append(request)
+        clock[0] += 6
+        return httpx.Response(409, json={"detail": {"code": "test_requests_in_flight"}})
+
+    transport(monkeypatch, handle)
+    with pytest.raises(CoverageTrackingError, match="in flight"):
+        execution.finish("passed", 1)
+    assert len(calls) == 1
+
+
+def test_sessionfinish_can_mark_an_unfinished_test_as_interrupted(monkeypatch):
+    from coverage_qa.pytest_plugin import pytest_sessionfinish
+
+    execution = Execution("http://coverage.test", uuid4(), "private-key", "test", "Test")
+    execution.started = True
+    transport(monkeypatch, lambda request: httpx.Response(
+        200, json={"id": execution.id, "runId": execution.run_id, "status": "interrupted"}))
+    monkeypatch.setattr(execution, "read", lambda: {"execution": {"id": execution.id}})
+    context = SimpleNamespace(executions={1: execution}, reports=[SimpleNamespace(duration=.123)],
+                              item=SimpleNamespace(api_entry={}))
+    session = SimpleNamespace(config=SimpleNamespace(_coverage_test_contexts=[context]), exitstatus=0)
+    pytest_sessionfinish(session, 0)
+    assert execution.final_result["status"] == "interrupted" and execution.finished
 
 
 def test_native_matrix_keeps_attempts_results_and_fields_without_local_inference(tmp_path):

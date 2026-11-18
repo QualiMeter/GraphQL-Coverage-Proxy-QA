@@ -6,11 +6,11 @@ backend. Панель и HTML-отчёт сохраняют полученные
 
 ## Запуск
 
-До слияния нужны ветки `feat/test-coverage` в QA и backend. Старая версия
-backend без `/api/runs/{id}/tests` не поддерживает эту интеграцию.
+Нужны QA-ветка `feat/test-coverage` и актуальный backend `main` с API
+`/api/runs/{id}/tests`. Более старые версии backend не поддерживают эту интеграцию.
 
 ```sh
-git clone --branch feat/test-coverage https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend.git
+git clone --branch main https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend.git
 git clone --branch feat/test-coverage https://github.com/QualiMeter/GraphQL-Coverage-Proxy-QA.git
 cd GraphQL-Coverage-Proxy-QA
 python -m venv .venv
@@ -94,10 +94,7 @@ const test = createCoverageTest(base);
 
 test('Название товара', async ({request, coverage}) => {
   const execution = await coverage.trackRun(process.env.COVERAGE_TEST_RUN_ID);
-  const response = await request.post(process.env.COVERAGE_URL + '/graphql', {
-    headers: {...execution.headers, 'X-Coverage-Api-Key': process.env.COVERAGE_API_KEY},
-    data: {query: '{ products { id name } }'},
-  });
+  const response = await execution.post(request, {query: '{ products { id name } }'});
   expect(response.status()).toBe(200);
   expect((await response.json()).data.products[0].name).toBe('Товар');
 });
@@ -149,10 +146,14 @@ resultMissing=true. После аварии процесса proxy счётчи�
 
 ## CI и объединение
 
-GitHub Actions выбирает backend `feat/test-coverage` для одноимённой QA-ветки
-и pull request из неё. Для остальных веток default — main; workflow_dispatch
-позволяет задать backend_ref. Root GitLab pipeline использует BACKEND_SHA,
-который после слияния backend можно обновить на проверенный коммит main.
+GitHub Actions использует backend `main`, а workflow_dispatch позволяет задать
+фиксированный backend_ref. Root GitLab pipeline закрепляет проверенный коммит
+backend через BACKEND_SHA; обновляйте его после изменения контрактов.
+
+При временном `409/test_requests_in_flight` finish повторяется ограниченное
+число раз с тем же UUID и исходным результатом. Параллельные Playwright
+`trackRun` используют один регистрационный Promise; метод `execution.post`
+отключает HTTP-редиректы, чтобы API-ключ не ушёл на чужой адрес.
 
 Сначала применяются миграция и backend API, затем QA-интеграция. Основной
 frontend команды не изменён. Его будущий экран может использовать список

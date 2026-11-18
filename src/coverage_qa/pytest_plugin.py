@@ -43,7 +43,11 @@ def publish(context, status, failure_code):
     for execution in context.executions.values():
         if execution.finished:
             continue
-        snapshot = execution.finish(status, duration_ms, failure_code)
+        result = execution.final_result
+        if result is None:
+            snapshot = execution.finish(status, duration_ms, failure_code)
+        else:
+            snapshot = execution.finish(result["status"], result["durationMs"], result["failureCode"])
         if entry is not None:
             save_snapshot(entry, snapshot)
 
