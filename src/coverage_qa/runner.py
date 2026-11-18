@@ -74,7 +74,8 @@ def main():
         from fastapi import HTTPException
         from coverage_qa.deployed import validate_deployed_target
         try:
-            validate_deployed_target(args.deployed_run_id, args.coverage_url, args.upstream_url)
+            args.deployed_run_id, args.coverage_url, args.upstream_url = validate_deployed_target(
+                args.deployed_run_id, args.coverage_url, args.upstream_url)
         except HTTPException as exc:
             parser.error(str(exc.detail))
     paths, extra = select_paths(extra, parser, args.suite, bool(args.live_base_url))

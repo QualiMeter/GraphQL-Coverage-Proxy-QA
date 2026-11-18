@@ -176,3 +176,19 @@ def test_snapshot_reads_all_own_requests_beyond_first_run_page(monkeypatch):
     snapshot = run.snapshot('Shared run')
     assert len(snapshot['requests']) == 1003
     assert all(row['testExecutionId'] == 'own' for row in snapshot['requests'])
+
+
+def test_cli_forwards_normalized_validated_run(monkeypatch, tmp_path):
+    from coverage_qa import runner
+    from coverage_qa import deployed
+    run_id = str(uuid4())
+    monkeypatch.setenv('COVERAGE_API_KEY', 'server-key')
+    monkeypatch.setattr('sys.argv', ['coverage-qa', '--suite', 'e2e', '--deployed-run-id', run_id.upper(),
+        '--coverage-url', 'https://coverage.test/', '--upstream-url', 'https://shop.test/',
+        '--report-dir', str(tmp_path / 'reports'), '--', SAFE])
+    monkeypatch.setattr(deployed, 'validate_deployed_target', lambda *args: (run_id, 'https://coverage.test', 'https://shop.test'))
+    with patch.object(runner.subprocess, 'call', return_value=0) as child:
+        assert runner.main() == 0
+    command = child.call_args.args[0]
+    assert '--deployed-run-id=' + run_id in command
+    assert '--coverage-url=https://coverage.test' in command
