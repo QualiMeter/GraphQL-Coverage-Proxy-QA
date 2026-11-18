@@ -175,7 +175,7 @@ def test_csv_and_summary_export(tmp_path, sample_coverage_graph_pass):
 
 @pytest.mark.case("GitLab Client: Запуск пайплайна через Trigger Token")
 def test_gitlab_trigger_pipeline_trigger_token():
-    client = GitLabClient(host="https://gitlab.example.com", token="trigger-token-abc")
+    client = GitLabClient(host="https://gitlab.com", token="trigger-token-abc")
 
     mock_resp = MagicMock()
     mock_resp.status_code = 201
@@ -183,7 +183,7 @@ def test_gitlab_trigger_pipeline_trigger_token():
         "id": 10101,
         "iid": 42,
         "status": "pending",
-        "web_url": "https://gitlab.example.com/org/repo/-/pipelines/10101",
+        "web_url": "https://gitlab.com/org/repo/-/pipelines/10101",
     }
 
     with patch("httpx.Client.post", return_value=mock_resp) as mock_post:
@@ -204,7 +204,7 @@ def test_gitlab_trigger_pipeline_trigger_token():
 
 @pytest.mark.case("GitLab Client: Запуск пайплайна через Personal Access Token (glpat-...)")
 def test_gitlab_trigger_pipeline_pat():
-    client = GitLabClient(host="https://gitlab.example.com", token="glpat-secret-token")
+    client = GitLabClient(host="https://gitlab.com", token="glpat-secret-token")
 
     mock_resp = MagicMock()
     mock_resp.status_code = 201
@@ -226,7 +226,7 @@ def test_gitlab_trigger_pipeline_pat():
 
 @pytest.mark.case("GitLab Client: Опрос статуса пайплайна до завершения")
 def test_gitlab_poll_pipeline_lifecycle():
-    client = GitLabClient(host="https://gitlab.example.com", token="token")
+    client = GitLabClient(host="https://gitlab.com", token="token")
 
     responses = [
         {"id": 55, "status": "pending", "duration": 0},
@@ -307,48 +307,22 @@ def panel_client(tmp_path):
     return TestClient(app), manager
 
 
-@pytest.mark.case("Панель TestLab: POST /api/gitlab/trigger запускает пайплайн")
 def test_panel_gitlab_trigger_api(panel_client):
     client, manager = panel_client
-    mock_pipeline = {"id": 888, "iid": 1, "status": "created", "web_url": "https://gitlab.com/test"}
-
-    with patch("coverage_qa.gitlab_ci.GitLabClient.trigger_pipeline", return_value=mock_pipeline):
-        response = client.post(
-            "/api/gitlab/trigger",
-            headers={"X-Panel-Token": manager.token},
-            json={
-                "project_id": "123",
-                "token": "secret-token",
-                "ref": "main",
-                "coverage_run_id": "test-run",
-            },
-        )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "triggered"
-    assert data["pipeline"]["id"] == 888
+    with patch.object(GitLabClient, "trigger_pipeline", side_effect=AssertionError("network")):
+        response = client.post("/api/gitlab/trigger", headers={"X-Panel-Token": manager.token},
+                               json={"project_id": "123", "token": "secret-token"})
+    assert response.status_code == 410
+    assert "secret-token" not in response.text
 
 
-@pytest.mark.case("Панель TestLab: POST /api/gitlab/gate оценивает качество прогона")
-def test_panel_gitlab_gate_api(panel_client, sample_coverage_graph_pass):
+def test_panel_gitlab_gate_api(panel_client):
     client, manager = panel_client
+    with patch.object(CoverageQualityGate, "fetch_coverage", side_effect=AssertionError("network")):
+        response = client.post("/api/gitlab/gate", headers={"X-Panel-Token": manager.token},
+                               json={"run_id": "11111111-1111-1111-1111-111111111111"})
+    assert response.status_code == 410
 
-    with patch("coverage_qa.gitlab_ci.CoverageQualityGate.fetch_coverage", return_value=sample_coverage_graph_pass):
-        response = client.post(
-            "/api/gitlab/gate",
-            headers={"X-Panel-Token": manager.token},
-            json={
-                "run_id": "11111111-1111-1111-1111-111111111111",
-                "min_coverage": 80.0,
-            },
-        )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["passed"] is True
-    assert data["coverage_percent"] == 90.0
-    assert data["covered_fields"] == 9
 
 def test_pipeline_artifact_gate(tmp_path, sample_coverage_graph_pass):
     graph = sample_coverage_graph_pass
@@ -372,25 +346,15 @@ def test_pipeline_artifact_gate(tmp_path, sample_coverage_graph_pass):
 
 def test_panel_status_requires_header(panel_client):
     client, _ = panel_client
-    path = "/api/gitlab/pipelines/123/456"
-    assert client.get(path).status_code == 401
-    with patch.object(GitLabClient, "get_pipeline", return_value={"status": "success"}) as get:
-        assert client.get(path, headers={"X-GitLab-Token": "test-token"}).json()["status"] == "success"
-    get.assert_called_once_with(project_id="123", pipeline_id=456, token="test-token")
+    with patch.object(GitLabClient, "get_pipeline", side_effect=AssertionError("network")):
+        assert client.get("/api/gitlab/pipelines/123/456").status_code == 410
+        assert client.get("/api/gitlab/pipelines/123/456", headers={"X-GitLab-Token": "test-token"}).status_code == 410
 
-def test_panel_uses_server_key_only_for_configured_proxy(panel_client, monkeypatch, sample_coverage_graph_pass):
+
+def test_panel_uses_server_key_only_for_configured_proxy(panel_client, monkeypatch):
     client, manager = panel_client
-    monkeypatch.setenv("COVERAGE_URL", "https://team.example.test")
     monkeypatch.setenv("COVERAGE_API_KEY", "test-server-key")
-    observed = []
-
-    def fetch(gate, run_id):
-        observed.append((gate.coverage_url, gate.api_key))
-        return sample_coverage_graph_pass
-
-    with patch.object(CoverageQualityGate, "fetch_coverage", fetch):
-        for url in ("https://team.example.test", "https://other.example.test"):
-            response = client.post("/api/gitlab/gate", headers={"X-Panel-Token": manager.token},
-                                   json={"run_id": sample_coverage_graph_pass["run_id"], "coverage_url": url})
-            assert response.status_code == 200
-    assert observed == [("https://team.example.test", "test-server-key"), ("https://other.example.test", "")]
+    with patch.object(CoverageQualityGate, "fetch_coverage", side_effect=AssertionError("network")):
+        response = client.post("/api/gitlab/gate", headers={"X-Panel-Token": manager.token},
+                               json={"run_id": "test", "coverage_url": "http://169.254.169.254"})
+    assert response.status_code == 410 and "test-server-key" not in response.text

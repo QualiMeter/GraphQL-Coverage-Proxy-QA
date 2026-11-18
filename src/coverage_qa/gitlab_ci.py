@@ -52,7 +52,11 @@ class GitLabClient:
         timeout: float = 30.0,
     ) -> None:
         raw_host = host or os.environ.get("GITLAB_HOST") or os.environ.get("CI_SERVER_URL") or DEFAULT_GITLAB_HOST
-        self.host = raw_host.strip().rstrip("/")
+        # This client only talks to the trusted public GitLab origin. HTTP routes
+        # are retired; CLI compatibility cannot reintroduce arbitrary destinations.
+        if raw_host not in {DEFAULT_GITLAB_HOST, DEFAULT_GITLAB_HOST + "/"}:
+            raise ValueError("Only https://gitlab.com is allowed")
+        self.host = DEFAULT_GITLAB_HOST
         self.token = token or os.environ.get("GITLAB_TOKEN") or os.environ.get("CI_JOB_TOKEN")
         self.timeout = timeout
 
@@ -82,7 +86,7 @@ class GitLabClient:
                 "ref": ref,
                 "variables": [{"key": k, "value": str(v)} for k, v in vars_dict.items()],
             }
-            with httpx.Client(timeout=self.timeout, trust_env=False) as client:
+            with httpx.Client(timeout=self.timeout, trust_env=False, follow_redirects=False) as client:
                 resp = client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
                 return resp.json()
@@ -92,7 +96,7 @@ class GitLabClient:
         for k, v in vars_dict.items():
             data[f"variables[{k}]"] = str(v)
 
-        with httpx.Client(timeout=self.timeout, trust_env=False) as client:
+        with httpx.Client(timeout=self.timeout, trust_env=False, follow_redirects=False) as client:
             resp = client.post(url, data=data)
             resp.raise_for_status()
             return resp.json()
@@ -103,8 +107,10 @@ class GitLabClient:
         pipeline_id: str | int,
         token: str | None = None,
     ) -> dict[str, Any]:
+        if not str(pipeline_id).isascii() or not str(pipeline_id).isdigit() or int(pipeline_id) < 1:
+            raise ValueError("Use a positive pipeline ID")
         pid = self._normalize_project_id(project_id)
-        url = f"{self.host}/api/v4/projects/{pid}/pipelines/{pipeline_id}"
+        url = f"{self.host}/api/v4/projects/{pid}/pipelines/{int(pipeline_id)}"
         auth_token = token or self.token
         headers = {}
         if auth_token:
@@ -113,7 +119,7 @@ class GitLabClient:
             else:
                 headers["JOB-TOKEN"] = auth_token
 
-        with httpx.Client(timeout=self.timeout, trust_env=False) as client:
+        with httpx.Client(timeout=self.timeout, trust_env=False, follow_redirects=False) as client:
             resp = client.get(url, headers=headers)
             resp.raise_for_status()
             return resp.json()
@@ -163,7 +169,7 @@ class CoverageQualityGate:
         if self.api_key:
             headers["X-Coverage-Api-Key"] = self.api_key
 
-        with httpx.Client(timeout=self.timeout, trust_env=False) as client:
+        with httpx.Client(timeout=self.timeout, trust_env=False, follow_redirects=False) as client:
             resp = client.get(url, headers=headers)
             resp.raise_for_status()
             graph = resp.json()
@@ -326,7 +332,11 @@ def _cmd_gate(args: argparse.Namespace) -> int:
 
 
 def _cmd_trigger(args: argparse.Namespace) -> int:
-    client = GitLabClient(host=args.host, token=args.token)
+    try:
+        client = GitLabClient(host=args.host, token=args.token)
+    except ValueError:
+        print("Invalid GitLab configuration", file=sys.stderr)
+        return 1
     variables = {}
     if args.variables:
         for item in args.variables:
@@ -347,7 +357,7 @@ def _cmd_trigger(args: argparse.Namespace) -> int:
             variables=variables,
         )
     except Exception as exc:
-        print(f"Error triggering GitLab pipeline: {exc}", file=sys.stderr)
+        print("Error triggering GitLab pipeline", file=sys.stderr)
         return 1
 
     pipe_id = pipeline.get("id")
@@ -377,7 +387,7 @@ def _cmd_trigger(args: argparse.Namespace) -> int:
             callback=progress,
         )
     except Exception as exc:
-        print(f"Pipeline polling error: {exc}", file=sys.stderr)
+        print("Pipeline polling error", file=sys.stderr)
         return 1
 
     final_status = final_info.get("status")
@@ -397,13 +407,17 @@ def _cmd_trigger(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
-    client = GitLabClient(host=args.host, token=args.token)
+    try:
+        client = GitLabClient(host=args.host, token=args.token)
+    except ValueError:
+        print("Invalid GitLab configuration", file=sys.stderr)
+        return 1
     try:
         info = client.get_pipeline(args.project, args.pipeline, token=args.token)
         print(json.dumps(info, indent=2, ensure_ascii=False))
         return 0
     except Exception as exc:
-        print(f"Error fetching pipeline status: {exc}", file=sys.stderr)
+        print("Error fetching pipeline status", file=sys.stderr)
         return 1
 
 
