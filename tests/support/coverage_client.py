@@ -78,7 +78,7 @@ class CoverageRun:
                     "eventIndex": len(self.api.entry["events"]) - 1, "runId": headers["X-Coverage-Run-Id"]}
         self.record["exchanges"].append(exchange)
         if headers["X-Coverage-Run-Id"] == self.run_id:
-            observations = self.rest("Сопоставить HTTP-запрос с наблюдением", "GET", f"/api/runs/{self.run_id}/requests?limit=500")
+            observations = self.request_pages("Сопоставить HTTP-запрос с наблюдением")
             new_ids = {o["id"] for o in observations} - self.seen_requests
             exchange["observedRequestIds"] = sorted(new_ids)
             exchange["attribution"] = "single-request-delta" if len(new_ids) == 1 else "none-or-ambiguous"
@@ -87,6 +87,18 @@ class CoverageRun:
             if len(new_ids) == 1:
                 self.attach_detail(exchange, exchange["requestDetails"][0])
         return status, body
+
+    def request_pages(self, title):
+        path = f"/api/runs/{self.run_id}/requests?sortOrder=asc"
+        if self.execution is not None:
+            path += "&testExecutionId=" + self.execution.id
+        rows, offset = [], 0
+        while True:
+            batch = self.rest(title, "GET", f"{path}&limit=500&offset={offset}")
+            rows.extend(batch)
+            if len(batch) < 500:
+                return rows
+            offset += len(batch)
 
     def request_detail(self, id):
         details = self.record["requestDetails"]
@@ -108,7 +120,7 @@ class CoverageRun:
             save_snapshot(self.api.entry, self.execution.read())
         graph = self.rest(title + ": покрытие", "GET", f"/api/runs/{self.run_id}/coverage")
         operations = self.rest(title + ": поля операций", "GET", f"/api/runs/{self.run_id}/operations")
-        requests = self.rest(title + ": обращения", "GET", f"/api/runs/{self.run_id}/requests?limit=500")
+        requests = self.request_pages(title + ": обращения")
         details = [self.request_detail(row["id"]) for row in requests]
         checkpoint = {"title": title, "graph": graph, "operations": operations, "requests": requests,
                       "requestDetails": details,

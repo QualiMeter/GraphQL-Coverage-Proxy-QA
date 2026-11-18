@@ -61,7 +61,7 @@ def test_browser_exchange_is_only_matched_with_its_own_execution(monkeypatch, ow
     replies = {"/api/runs/run/coverage": {"types": [], "summary": {}},
                "/api/runs/run/operations": [{"operationKey": operation_key, "operationType": "query",
                    "requestCount": 1, "countedRequestCount": 1, "fields": []}],
-               "/api/runs/run/requests?limit=500": [{"id": "request"}]}
+               "/api/runs/run/requests?sortOrder=asc&testExecutionId=this-execution&limit=500&offset=0": [{"id": "request"}]}
     monkeypatch.setattr(run, "rest", lambda title, method, path: replies[path])
     monkeypatch.setattr(run, "request_detail", lambda ident: detail)
     try:
