@@ -89,8 +89,9 @@ class TestExecution:
         self._identity(response)
         if response.get("status") != status:
             raise CoverageTrackingError("Coverage API did not confirm the submitted result")
+        snapshot = self.read()
         self.finished = True
-        return self.read()
+        return snapshot
 
     def _identity(self, data):
         if not isinstance(data, dict) or data.get("id") != self.id or data.get("runId") != self.run_id:

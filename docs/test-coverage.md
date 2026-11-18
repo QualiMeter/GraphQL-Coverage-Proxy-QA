@@ -6,12 +6,12 @@ backend. Панель и HTML-отчёт сохраняют полученные
 
 ## Запуск
 
-Нужны QA-ветка `feat/test-coverage` и актуальный backend `main` с API
+Нужны QA-ветка `feat/forma-e2e-test-coverage` и актуальный backend `main` с API
 `/api/runs/{id}/tests`. Более старые версии backend не поддерживают эту интеграцию.
 
 ```sh
 git clone --branch main https://github.com/QualiMeter/GraphQL-Coverage-Proxy-Beckend.git
-git clone --branch feat/test-coverage https://github.com/QualiMeter/GraphQL-Coverage-Proxy-QA.git
+git clone --branch feat/forma-e2e-test-coverage https://github.com/QualiMeter/GraphQL-Coverage-Proxy-QA.git
 cd GraphQL-Coverage-Proxy-QA
 python -m venv .venv
 ```
@@ -40,6 +40,81 @@ python -m coverage_qa test tests/api/coverage/test_test_coverage.py tests/platfo
 результаты и попытки, фильтры по статусу и полю `Type.field`, поля и журнал
 каждой попытки. Без серверного подтверждения интерфейс не подменяет результат
 локальным passed.
+
+## FORMA: два режима E2E
+
+Изолированный режим создаёт временные PostgreSQL, commerce API и Coverage backend.
+Storefront поднимается отдельно для каждого сценария; сценарий получает собственные
+runId и executionId. Обычные E2E запускаются прежней командой:
+
+```sh
+python -m coverage_qa test --suite e2e tests/e2e/test_shop.py --coverage-backend-dir ../GraphQL-Coverage-Proxy-Beckend
+```
+
+Регрессия обоих режимов работает только с управляемым окружением. Она запускает
+два существующих браузерных сценария и намеренные assertion/teardown/skip,
+сверяет серверные обращения, поля, идемпотентность метаданных и TestLab:
+
+```sh
+python -m coverage_qa test tests/api/coverage/test_forma_e2e_coverage.py --coverage-backend-dir ../GraphQL-Coverage-Proxy-Beckend
+```
+
+Во втором варианте этой регрессии родитель создаёт временный активный прогон,
+а дочерний runner использует его как существующий: не создаёт другой прогон
+и не завершает выбранный. Только владелец временного окружения закрывает его
+после проверок. Тестовые заказы отменяются прежним cleanup, в том числе после
+провала assertion. Регрессия не использует адреса или БД VPS.
+
+В рабочем режиме TestLab использует серверные QA_DEPLOYED_COVERAGE_URL,
+QA_DEPLOYED_SHOP_API_URL и COVERAGE_API_KEY из существующего защищённого
+окружения сервиса. Пользователь выбирает активный прогон сервиса
+`forma-demo-shop`. Панель проверяет сервис и статус и передаёт runner
+`--deployed-run-id`; каждый сценарий получает отдельный executionId в этом
+прогоне. Даже skip до setup storefront сохраняется с нулём обращений.
+В изолированном режиме skip до setup не создаёт инфраструктуру или пустой прогон.
+
+Запрос идёт browser → локальный BFF сценария → рабочий Coverage Proxy → FORMA API.
+SHOP_COVERAGE_API_KEY, SHOP_COVERAGE_RUN_ID и SHOP_COVERAGE_TEST_EXECUTION_ID
+задаёт runner только процессу BFF. Браузер передаёт свой пользовательский
+Authorization; административный ключ не включается в config, HTML, JS или
+ответы BFF. Заголовки атрибуции из браузера не переопределяют серверные значения.
+Не добавляйте административный ключ в page/request headers Playwright.
+
+### Ручная проверка после обновления QA на VPS
+
+1. Оператор вручную получает ветку `feat/forma-e2e-test-coverage` без merge
+   и force push, устанавливает закреплённые зависимости и Chromium прежним
+   способом, перезапускает только QA/TestLab. Backend и основной frontend
+   этой задачей не меняются; новые миграции не нужны. Сохраните reports и
+   существующие защищённые env-файлы. Инструкции установки магазина —
+   [forma-shop-vps.md](forma-shop-vps.md).
+2. Убедитесь, что три серверные настройки выше указывают на нужный стенд.
+   Уберите COVERAGE_TEST_RUN_ID/COVERAGE_URL от прежних внешних SDK-примеров.
+   Не выводите ключ в терминал, DevTools, отчёт или командную строку.
+3. Выберите существующий активный прогон FORMA. Зафиксируйте его UUID,
+   статус, список tests и количество requests перед проверкой. При фоновом
+   трафике сравнивайте по новым executionId, а не по общему приросту requests.
+4. Для безопасной smoke-проверки выберите только
+   `test_storefront_catalog_and_cart` и `test_storefront_login_error_and_inspector`
+   в рабочем режиме FORMA. Они не создают и не отменяют заказы, не списывают
+   остатки. Не запускайте покупочные сценарии на production-БД или рабочих
+   заказах. Полная проверка покупок и очистки уже выполняется в управляемой
+   регрессии; при необходимости её повторяют на отдельном тестовом стенде.
+5. После окончания откройте запуск → **Test Coverage**. Должны быть две
+   разные попытки со статусом passed, с полями Query.products/Product.*;
+   у сценария неверного входа дополнительно есть его запрос Login.
+   Ни одна попытка не должна оставаться running.
+6. С серверной стороны через существующий авторизованный API проверьте
+   GET `/api/runs/{runId}/tests`, `/tests/{executionId}`,
+   `/tests/{executionId}/fields`, `/requests?testExecutionId={executionId}`
+   и `/test-coverage`. Все обращения попытки должны иметь выбранный runId
+   и свой testExecutionId; счётчики API и TestLab должны совпасть.
+   Ошибочный Login остаётся обращением; counted coverage проверяйте отдельно
+   от selected/observed fields. Общий прогон может содержать и фоновый трафик.
+7. Сверьте список прогонов сервиса до/после: лишнего прогона быть не должно,
+   выбранный остаётся running. В DevTools проверьте отсутствие административного
+   ключа в браузерных запросах и ответах `/api/config`, HTML, JS.
+   Данные и отчёты не удаляйте; выбранный рабочий прогон не закрывайте.
 
 ## Свои pytest-тесты
 

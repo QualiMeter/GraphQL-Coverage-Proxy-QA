@@ -129,6 +129,32 @@ def test_finish_rejects_unrelated_conflicts_without_retry(monkeypatch):
     assert len(calls) == 1
 
 
+def test_failed_snapshot_read_is_retried_before_result_is_considered_published(monkeypatch):
+    from coverage_qa.pytest_plugin import publish, pytest_sessionfinish
+
+    execution = Execution("http://coverage.test", uuid4(), "private-key", "test", "Test")
+    execution.started = True
+    submitted = []
+
+    def handle(request):
+        submitted.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": execution.id, "runId": execution.run_id, "status": "passed"})
+
+    transport(monkeypatch, handle)
+    monkeypatch.setattr(execution, "read", lambda: (_ for _ in ()).throw(CoverageTrackingError("read unavailable")))
+    entry = {}
+    context = SimpleNamespace(executions={1: execution}, reports=[SimpleNamespace(duration=.123)],
+                              item=SimpleNamespace(api_entry=entry))
+    with pytest.raises(CoverageTrackingError, match="read unavailable"):
+        publish(context, "passed", None)
+    assert not execution.finished
+    monkeypatch.setattr(execution, "read", lambda: {"execution": {"id": execution.id}})
+    session = SimpleNamespace(config=SimpleNamespace(_coverage_test_contexts=[context]), exitstatus=0)
+    pytest_sessionfinish(session, 0)
+    assert execution.finished and len(entry["serverTestCoverage"]) == 1
+    assert submitted == [{"status": "passed", "durationMs": 123, "failureCode": None}] * 2
+
+
 def test_finish_busy_retry_has_a_deadline(monkeypatch):
     execution = Execution("http://coverage.test", uuid4(), "private-key", "test", "Test")
     execution.started = True

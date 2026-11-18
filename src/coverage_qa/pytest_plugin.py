@@ -6,6 +6,14 @@ import pytest
 from coverage_qa.tracking import CURRENT_TEST, CoverageTrackingError, begin_current_test, save_snapshot
 
 
+def configured_run(config):
+    run_id = config.getoption("--deployed-run-id", default=None)
+    if run_id:
+        return (config.getoption("--coverage-url"), run_id, os.environ.get("COVERAGE_API_KEY"))
+    return (os.environ.get("COVERAGE_URL"), os.environ.get("COVERAGE_TEST_RUN_ID"),
+            os.environ.get("COVERAGE_API_KEY"))
+
+
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)
 def pytest_runtest_protocol(item, nextitem):
     marker = item.get_closest_marker("case")
@@ -29,11 +37,10 @@ def pytest_runtest_setup(item):
     attempt = max(1, int(getattr(item, "execution_count", 1)))
     if context.attempt != attempt:
         context.attempt, context.executions, context.reports = attempt, {}, []
-    run_id = os.environ.get("COVERAGE_TEST_RUN_ID")
+    base, run_id, key = configured_run(item.config)
     if run_id:
-        base, key = os.environ.get("COVERAGE_URL"), os.environ.get("COVERAGE_API_KEY")
         if not base or not key:
-            raise CoverageTrackingError("COVERAGE_TEST_RUN_ID requires COVERAGE_URL and COVERAGE_API_KEY")
+            raise CoverageTrackingError("Test Coverage run requires a Coverage URL and COVERAGE_API_KEY")
         begin_current_test(base, run_id, key)
 
 
@@ -67,9 +74,9 @@ def pytest_runtest_makereport(item, call):
     status = "failed" if failed else "skipped" if skipped else "passed"
     code = {"setup": "setup_failed", "call": "assertion_failed", "teardown": "teardown_failed"}.get(failed.when) if failed else None
     try:
-        if not context.executions and os.environ.get("COVERAGE_TEST_RUN_ID"):
-            begin_current_test(os.environ.get("COVERAGE_URL"), os.environ.get("COVERAGE_TEST_RUN_ID"),
-                               os.environ.get("COVERAGE_API_KEY"))
+        base, run_id, key = configured_run(item.config)
+        if not context.executions and run_id:
+            begin_current_test(base, run_id, key)
         publish(context, status, code)
     except (CoverageTrackingError, ValueError) as exc:
         message = f"Test Coverage result was not confirmed: {exc}"

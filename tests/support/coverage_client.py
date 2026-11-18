@@ -122,7 +122,8 @@ class CoverageRun:
                 key = hashlib.sha256(json.dumps(identity, ensure_ascii=True, separators=(",", ":")).encode()).hexdigest()
                 if key == operation["operationKey"]:
                     exchange["observedOperationKey"] = key
-                    matching = [d for d in details if d["operationKey"] == key]
+                    matching = [d for d in details if d["operationKey"] == key
+                                and (self.execution is None or d.get("testExecutionId") == self.execution.id)]
                     if exchange.get("attribution") == "browser-operation-aggregate" and len(matching) == 1:
                         exchange["observedRequestIds"] = [matching[0]["id"]]
                         exchange["attribution"] = "unique-operation-request"
