@@ -8,6 +8,8 @@ from pathlib import Path
 import httpx
 import pytest
 
+pytest_plugins = ("coverage_qa.pytest_plugin",)
+
 from coverage_qa.reporting.html import write_report
 from coverage_qa.reporting.history import new_run, save_json, update_history
 from coverage_qa.reporting.progress import bind, emit
@@ -126,9 +128,14 @@ def pytest_sessionfinish(session, exitstatus):
     if session.config.option.collectonly:
         return
     report = session.config.api_report
+    for stack in reversed(getattr(session.config, "_coverage_stacks", [])):
+        errors = stack.close()
+        report["infrastructureErrors"].extend(errors)
+        if errors:
+            session.exitstatus = 1
     cancelled = (session.config.run_folder / "cancel.requested").exists()
     report["cancelled"] = cancelled
-    report["exitCode"] = 2 if cancelled else int(exitstatus)
+    report["exitCode"] = 2 if cancelled else int(session.exitstatus)
     if cancelled:
         session.exitstatus = 2
     report["finishedAt"] = datetime.now(timezone.utc).isoformat()
@@ -168,16 +175,20 @@ def coverage_stack(request):
     config = request.config
     if config.getoption("--managed-coverage"):
         stack = CoverageStack(config.run_folder, config.getoption("--coverage-backend-dir") or TEAM_BACKEND)
+        config._coverage_stacks = getattr(config, "_coverage_stacks", [])
+        config._coverage_stacks.append(stack)
         try:
             stack.start()
             config.api_report["backend"] = stack.identity
             config.api_report["endpoint"] = stack.proxy.base + "/graphql"
             yield stack
-        finally:
+        except BaseException:
             errors = stack.close()
+            config._coverage_stacks.remove(stack)
             config.api_report["infrastructureErrors"].extend(errors)
             if errors:
                 pytest.fail("; ".join(errors))
+            raise
     else:
         base, upstream = config.getoption("--coverage-url"), config.getoption("--upstream-url")
         if not base or not upstream or not os.environ.get("COVERAGE_API_KEY"):
@@ -214,16 +225,20 @@ def business_stack(request):
     folder = request.config.run_folder / "business-infrastructure"
     folder.mkdir(exist_ok=True)
     stack = CoverageStack(folder, request.config.getoption("--coverage-backend-dir") or TEAM_BACKEND, commerce=True)
+    request.config._coverage_stacks = getattr(request.config, "_coverage_stacks", [])
+    request.config._coverage_stacks.append(stack)
     try:
         stack.start()
         request.config.api_report["backend"] = stack.identity
         request.config.api_report["endpoint"] = f"{stack.upstream.base}/graphql (business direct); {stack.proxy.base}/graphql (business proxy)"
         yield stack
-    finally:
+    except BaseException:
         errors = stack.close()
+        request.config._coverage_stacks.remove(stack)
         request.config.api_report["infrastructureErrors"].extend(errors)
         if errors:
             pytest.fail("; ".join(errors))
+        raise
 
 
 @pytest.fixture(params=["direct", "proxy"])

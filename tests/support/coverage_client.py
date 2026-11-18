@@ -1,6 +1,7 @@
 import hashlib
 import json
 import urllib.parse
+from coverage_qa.tracking import begin_current_test, save_snapshot
 from uuid import uuid4
 
 
@@ -15,6 +16,7 @@ class CoverageRun:
         self.run_id = self.snapshot_id = self.service_id = None
         self.finished = False
         self.record = None
+        self.execution = None
         self.seen_requests = set()
         self.total_fields = total_fields
 
@@ -41,6 +43,7 @@ class CoverageRun:
                         {"snapshotId": self.snapshot_id, "name": (name + ": " + test_id)[-200:],
                          "metadata": {"testRunId": self.report["id"], "pytestNodeId": node_id}}, expected=201)
         self.run_id = run["id"]
+        self.execution = begin_current_test(self.base, self.run_id, self.api.key)
         self.run_name = run["name"]
         self.finished = False
         self.seen_requests = set()
@@ -52,6 +55,8 @@ class CoverageRun:
 
     def graphql(self, title, query, *, variables=None, operation=None, fields=(), mode=None, run_id=None, headers=None):
         headers = {**(headers or {}), "X-Coverage-Run-Id": run_id or self.run_id}
+        if self.execution is not None and headers["X-Coverage-Run-Id"] == self.run_id:
+            headers.setdefault("X-Coverage-Test-Execution-Id", self.execution.id)
         if self.record:
             if "testId" in self.record and self.record["testId"]:
                 headers["X-Test-Id"] = urllib.parse.quote(str(self.record["testId"]))
@@ -99,6 +104,8 @@ class CoverageRun:
         event["countedInCoverage"] = detail["countedInCoverage"]
 
     def snapshot(self, title):
+        if self.execution is not None:
+            save_snapshot(self.api.entry, self.execution.read())
         graph = self.rest(title + ": покрытие", "GET", f"/api/runs/{self.run_id}/coverage")
         operations = self.rest(title + ": поля операций", "GET", f"/api/runs/{self.run_id}/operations")
         requests = self.rest(title + ": обращения", "GET", f"/api/runs/{self.run_id}/requests?limit=500")

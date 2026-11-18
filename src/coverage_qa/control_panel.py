@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from coverage_qa.reporting.history import new_run, save_json, update_history
 from coverage_qa.reporting.html import write_report
+from coverage_qa.reporting.test_coverage import server_executions
 
 
 from coverage_qa.environment import ROOT
@@ -156,6 +157,13 @@ class Manager:
         if evidence is None:
             return {"events": [], "status": "pending", "title": "Сценарий ещё не выполнялся"}
         return evidence
+
+    def test_coverage(self, id):
+        folder = self.folder(id)
+        report = load(folder / "results.json")
+        if report is None:
+            report = {"tests": [load(path, {}) for path in (folder / "live").glob("*.json")]}
+        return {"source": "backend-snapshots", "executions": server_executions(report)}
 
     def start(self, ids, label, include_live, deployed_run_id=None):
         catalog = {x["id"]: x for x in self.catalog()}
@@ -322,6 +330,10 @@ def create_app(manager=None):
     @app.get("/api/runs/{id}/tests/{key}")
     def evidence(id: str, key: str):
         return manager.evidence(id, key)
+
+    @app.get("/api/runs/{id}/test-coverage")
+    def test_coverage(id: str):
+        return manager.test_coverage(id)
 
     @app.post("/api/runs/{id}/cancel")
     def cancel(id: str):

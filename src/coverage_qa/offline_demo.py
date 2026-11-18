@@ -135,7 +135,8 @@ def bundle_offline_showcase(output_dir: Path | str = None, *, source_dir: Path |
     links = []
     if source:
         for filename, label in (("index.html", "Отчёт"), ("coverage.csv", "Coverage CSV"),
-                                ("test-matrix.csv", "Матрица тестов")):
+                                ("test-matrix.csv", "Матрица тестов"),
+                                ("server-test-coverage.json", "Test Coverage JSON")):
             if (target / "report" / filename).is_file():
                 links.append(f'<a href="report/{filename}">{label}</a>')
     identity = source.name if source else None

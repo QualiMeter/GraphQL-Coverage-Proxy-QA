@@ -1,6 +1,7 @@
 import re
 import time
 import httpx
+from coverage_qa.tracking import current_headers
 from coverage_qa.reporting.progress import emit
 
 class EvidenceMismatch(AssertionError):
@@ -14,11 +15,16 @@ class API:
         self.client = httpx.Client(timeout=45, trust_env=False)
         self.key = key
 
-    def raw(self, title, *, payload=None, content=None, headers=None):
-        return self.http(title, "POST", self.url, payload=payload, content=content, headers=headers)
+    def raw(self, title, *, payload=None, content=None, headers=None, tracking=True):
+        return self.http(title, "POST", self.url, payload=payload, content=content, headers=headers, tracking=tracking)
 
-    def http(self, title, method, url, *, payload=None, content=None, headers=None, auth=True):
+    def http(self, title, method, url, *, payload=None, content=None, headers=None, auth=True, tracking=True):
         outgoing = {**({"X-Coverage-Api-Key": self.key} if self.key and auth else {}), **(headers or {})}
+        if tracking and method == "POST" and url.rstrip("/").endswith("/graphql"):
+            run_id = outgoing.get("X-Coverage-Run-Id")
+            if run_id:
+                for name, value in current_headers(url.rsplit("/graphql", 1)[0], run_id).items():
+                    outgoing.setdefault(name, value)
         event = {"kind": "request", "title": title,
                  "request": redact(payload) if content is None else content,
                  "method": method, "url": url,
@@ -85,6 +91,8 @@ SENSITIVE_KEYS = {
 
 
 def redact(value):
+    if isinstance(value, (set, frozenset)):
+        return [redact(item) for item in sorted(value, key=repr)]
     if isinstance(value, str):
         v = BEARER_TOKEN_RE.sub("Bearer <redacted>", value)
         return INLINE_SECRET_RE.sub(r'\g<1>"<redacted>"', v)

@@ -13,6 +13,7 @@ from playwright.sync_api import expect, sync_playwright
 from tests.support.http_client import API, ensure_entry, redact
 from tests.support.coverage_client import CoverageRun
 from coverage_qa.environment import ROOT, Server
+from coverage_qa.tracking import begin_current_test
 from coverage_qa.reporting.progress import emit, evidence_id
 
 
@@ -63,11 +64,14 @@ def storefront(request):
             entry["coverageContext"] = {"runId": run.run_id}
         else:
             run.prepare(request.node.nodeid)
+        if run.execution is None:
+            run.execution = begin_current_test(run.base, run.run_id, api.key)
         token = direct('mutation($password:String!){login(email:"alice@example.test",password:$password){token}}',
                        {"password": "test-password-2026"})["login"]["token"]
         server = Server("examples.shop.web.server:app", ROOT, request.config.run_folder / (slug + ".log"), {
             "SHOP_GRAPHQL_URL": business_stack.proxy.base + "/graphql",
             "SHOP_COVERAGE_API_KEY": business_stack.key, "SHOP_COVERAGE_RUN_ID": run.run_id,
+            "SHOP_COVERAGE_TEST_EXECUTION_ID": run.execution.id if run.execution is not None else "",
         })
         server.start()
         with sync_playwright() as playwright:

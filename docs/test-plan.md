@@ -1,9 +1,10 @@
 # Требования и проверки
 
-Основа — публичный контракт и исходники backend main `41db524295e5cbf27a100bd417f62ddc896b30d6`. Ссылки на поддерживаемые endpoints и границы проверки перечислены в [backend-compatibility.md](backend-compatibility.md).
+Основа — публичный контракт и исходники backend feat/test-coverage `f0a76149cfb758f34fa710a894e75ed3521260d1`. Ссылки на поддерживаемые endpoints и границы проверки перечислены в [backend-compatibility.md](backend-compatibility.md).
 
 | Требование | Сценарий | Доказательство |
 |---|---|---|
+| Test Coverage | test_pytest_result_lifecycle_and_native_panel, test_playwright_result_retry_and_parallel_attribution | Настоящие passed/failed/skipped после teardown, retry и workers, сохранение после рестарта, серверные поля и фильтр в браузере |
 | Настоящая схема | empty_and_schema_deduplication | Introspection через upstream, 10 полей, повторный импорт возвращает тот же snapshot |
 | Прозрачный proxy | transparent_response_and_headers | Прямой и проксированный read-only ответ совпадают; служебные заголовки удалены |
 | Query и Mutation | demo_three_runs | Поля выбранной операции совпадают с независимым ожиданием |
