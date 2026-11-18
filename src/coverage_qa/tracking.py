@@ -67,6 +67,8 @@ class TestExecution:
             try:
                 response.json()
             except ValueError:
+                if attempt < 2:
+                    continue
                 raise CoverageTrackingError("Coverage metadata response is not JSON") from None
             return response
         raise CoverageTrackingError("Coverage metadata request failed")
@@ -116,7 +118,7 @@ class TestExecution:
         self.snapshot = {"source": "backend", "fetchedAt": datetime.now(timezone.utc).isoformat(),
                          "execution": data,
                          "fields": self._pages(self.path + "/fields"),
-                         "requests": self._pages(f"/api/runs/{self.run_id}/requests?testExecutionId={self.id}")}
+                         "requests": self._pages(f"/api/runs/{self.run_id}/requests?sortOrder=asc&testExecutionId={self.id}")}
         return self.snapshot
 
 
@@ -126,10 +128,12 @@ def begin_current_test(base_url, run_id, api_key):
         return None
     key = (base_url.rstrip("/"), str(run_id))
     if key not in context.executions:
-        execution = TestExecution(base_url, run_id, api_key, context.test_id, context.name, attempt=context.attempt)
+        execution = TestExecution(base_url, run_id, api_key, context.test_id, context.name, attempt=None)
         context.executions[key] = execution
+    execution = context.executions[key]
+    if not execution.started:
         execution.start()
-    return context.executions[key]
+    return execution
 
 
 def current_headers(base_url, run_id):

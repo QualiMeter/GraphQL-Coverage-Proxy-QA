@@ -203,3 +203,21 @@ def test_native_matrix_keeps_attempts_results_and_fields_without_local_inference
     with TestClient(create_app(Manager(tmp_path))) as client:
         data = client.get(f"/api/runs/{folder.name}/test-coverage").json()
     assert data["source"] == "backend-snapshots" and data["executions"] == server_executions(report)
+
+
+def test_pytest_retry_retains_previous_unconfirmed_result_for_shutdown(monkeypatch):
+    from coverage_qa import pytest_plugin
+    previous = SimpleNamespace(finished=False, final_result={'status': 'failed', 'durationMs': 3, 'failureCode': 'assertion_failed'})
+    context = SimpleNamespace(attempt=1, executions={'old': previous}, reports=[])
+    config = SimpleNamespace(_coverage_test_contexts=[context])
+    item = SimpleNamespace(execution_count=2, config=config)
+    monkeypatch.setattr(pytest_plugin, 'configured_run', lambda config: (None, None, None))
+    token = tracking.CURRENT_TEST.set(context)
+    try:
+        pytest_plugin.pytest_runtest_setup(item)
+    finally:
+        tracking.CURRENT_TEST.reset(token)
+    assert context.attempt == 2 and not context.executions
+    pending = [execution for saved in config._coverage_test_contexts for execution in saved.executions.values()]
+    assert pending == [previous]
+    assert pending[0].final_result['status'] == 'failed'

@@ -36,6 +36,10 @@ def pytest_runtest_setup(item):
         return
     attempt = max(1, int(getattr(item, "execution_count", 1)))
     if context.attempt != attempt:
+        from copy import copy
+        # Keep the previous retry's unconfirmed result reachable for shutdown
+        # recovery before replacing this context's current execution dictionary.
+        item.config._coverage_test_contexts.append(copy(context))
         context.attempt, context.executions, context.reports = attempt, {}, []
     base, run_id, key = configured_run(item.config)
     if run_id:
