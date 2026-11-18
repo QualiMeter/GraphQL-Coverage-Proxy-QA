@@ -22,7 +22,7 @@
 
 ## Выбор версии backend в CI
 
-При обычном push/PR проверяется текущий `main` backend. Для воспроизводимой проверки используйте Actions → API integration tests → Run workflow → `backend_ref`: ветку, tag или полный commit SHA. Checkout backend публичный; для приватного форка установите secret `COVERAGE_BACKEND_TOKEN` с правом чтения этого репозитория. Сам секрет не хранится в коде.
+При обычном push/PR проверяется совместимый Backend SHA, закреплённый в `.github/workflows/tests.yml`; GitLab использует тот же SHA из `.gitlab-ci.yml`. Обновляйте оба pin согласованно. Для воспроизводимой проверки используйте Actions → API integration tests → Run workflow → `backend_ref`: ветку, tag или полный commit SHA. Checkout backend публичный; для приватного форка установите secret `COVERAGE_BACKEND_TOKEN` с правом чтения этого репозитория. Сам секрет не хранится в коде.
 
 QA не меняет исходники командного backend. Скрипт `tools/prove_coverage_detection.py` намеренно вносит дефект только во временную копию и проверяет, что тест его обнаружил.
 

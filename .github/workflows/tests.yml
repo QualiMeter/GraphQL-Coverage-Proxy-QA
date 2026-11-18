@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       backend_ref:
-        description: Backend ref override (defaults to main with Test Coverage API)
+        description: Backend ref override (defaults to the pinned compatible Backend)
         default: ''
         required: false
       frontend_ref:
@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      QA_BACKEND_REF: ${{ inputs.backend_ref || 'main' }}
+      QA_BACKEND_REF: ${{ inputs.backend_ref || '148187f2ec28123fdf8f02d562f435729ca84ac6' }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/api-tests/.browsers
       QA_FRONTEND_DIST: ${{ github.workspace }}/coverage-frontend/dist
     steps:
